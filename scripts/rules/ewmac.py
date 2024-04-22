@@ -19,5 +19,8 @@ def calculate_forecast(df_continuous, args):
     ewmac_slow = df_continuous['AdjustPrice'].ewm(span=slow_window, min_periods=slow_window,
                                                   adjust=False).mean()
     raw_forecast = ewmac_fast - ewmac_slow
-    forecast = (raw_forecast / daily_price_diff_vol * forecast_scalar).clip(-forecast_max, forecast_max)
+    raw_forecast[0] = 0 if numpy.isnan(raw_forecast[0]) else raw_forecast[0]
+    raw_forecast = raw_forecast.ffill()
+    forecast = (raw_forecast / daily_price_diff_vol * forecast_scalar)
+    forecast = forecast.clip(-forecast_max, forecast_max)
     return forecast

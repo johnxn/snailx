@@ -31,7 +31,6 @@ class DataBlob(object):
         self.strategy_parameters = None
 
         self.make_data_dirs()
-        self.generate_portfolio_config()
 
     def make_data_dirs(self):
         for d in [self.futures_single_contracts_dir,
@@ -41,18 +40,11 @@ class DataBlob(object):
                   self.futures_roll_calendar_dir]:
             if not os.path.exists(d):
                 os.makedirs(d)
-
-    def generate_portfolio_config(self):
-        if os.path.exists(self.portfolio_config_file_path):
-            return
-        data = {
-            'Symbol': ['TA', 'M', 'RB'],
-            'Name': ['PTA', '豆粕', '螺纹钢'],
-            'CarryContract': ['202405', '202405', '202405'],
-            'CurrentContract': ['202409', '202409', '202409'],
-        }
-        df = pd.DataFrame(data)
-        df.to_excel(self.portfolio_config_file_path, index=False)
+        for d in [self.futures_single_contracts_dir]:
+            for symbol in self.get_portfolio_symbol_list():
+                sub_dir = os.path.join(d, symbol)
+                if not os.path.exists(sub_dir):
+                    os.makedirs(sub_dir)
 
     def get_portfolio_config(self) -> pd.DataFrame:
         if self.df_portfolio_config is None:
@@ -61,53 +53,55 @@ class DataBlob(object):
 
     def get_portfolio_symbol_list(self):
         return list(self.get_portfolio_config()['Symbol'])
+    
+    def get_single_contract_file_path(self, symbol, contract_date):
+        return os.path.join(self.futures_single_contracts_dir, f"{symbol}/{contract_date}.csv")
 
     def get_single_contract(self, symbol, contract_date) -> pd.DataFrame:
         if (symbol, contract_date) in self.df_contract_cache_dict:
             return self.df_contract_cache_dict[(symbol, contract_date)]
-        df = pd.read_csv(os.path.join(self.futures_single_contracts_dir, f"{symbol}/{contract_date}.csv"),
-                         index_col='Date', parse_dates=['Date'])
+        single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
+        df = pd.read_csv(single_contract_filepath, index_col='Date', parse_dates=['Date'])
         self.df_contract_cache_dict[(symbol, contract_date)] = df
         return df
 
     def update_single_contract(self, symbol, contract_date):
-        print(f'updating single contract {symbol}{contract_date}')
         contracts_data_dir = os.path.join(self.futures_single_contracts_dir, symbol)
         if not os.path.exists(contracts_data_dir):
             os.mkdir(contracts_data_dir)
+        single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
         df = self.data_source.download_single_contract(symbol, contract_date)
-        df.to_csv(os.path.join(contracts_data_dir, f"{contract_date}.csv"), index=False)
+        if df is None:
+            print(f"update single contract {symbol}{contract_date} failed")
+            return
+        if os.path.exists(single_contract_filepath):
+            df_old = self.get_single_contract(symbol, contract_date)
+            df_added = df[df.index > df_old.index[-1]]
+            if len(df_added) > 0:
+                print(f'add {len(df_added)} rows data for single contract {symbol}{contract_date}')
+                df = pd.concat([df_old, df_added])
+                df.to_csv(single_contract_filepath, index=False)
+        else:
+            print(f"download contract data for single contract {symbol}{contract_date}")
+            df.to_csv(single_contract_filepath, index=False)
 
     def update_single_contracts_in_portfolio(self):
-        df_symbol = self.get_portfolio_config()
-        contract_list = set()
-        for _, row in df_symbol.iterrows():
-            # 用户自己输入的Contract日期，需要Update
-            symbol = row['Symbol']
-            carry_contract = row['CarryContract']
-            current_contract = row['CurrentContract']
-            contract_list.add((symbol, carry_contract))
-            contract_list.add((symbol, current_contract))
-
-            # 正在交易的Contract, 也需要Update
-            df_continuous = self.get_data_continuous(symbol)
-            carry_contract = df_continuous.iloc[-1]['CarryContract']
-            current_contract = df_continuous.iloc[-1]['CurrentContract']
-            contract_list.add((symbol, carry_contract))
-            contract_list.add((symbol, current_contract))
-
-        for symbol, contract_date in contract_list:
-            self.update_single_contract(symbol, contract_date)
+        symbol_list = self.get_portfolio_symbol_list()
+        for symbol in symbol_list:
+            contract_date_list = self.data_source.get_active_contract_dates(symbol)
+            for contract_date in contract_date_list:
+                self.update_single_contract(symbol, contract_date)
         self.df_contract_cache_dict = {}
 
     def populate_single_contracts_in_portfolio(self):
         symbol_list = self.get_portfolio_symbol_list()
         contracts_dict = self.data_source.download_all_single_contracts(symbol_list)
         for (symbol, contract_date), df_contract in contracts_dict.items():
-            save_path = os.path.join(self.futures_single_contracts_dir, f"{symbol}/{contract_date}.csv")
-            if os.path.exists(save_path):
-                print(f"overriding exists single contracts, {symbol}, {contract_date}")
-            df_contract.to_csv(save_path, index=False)
+            single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
+            if os.path.exists(single_contract_filepath):
+                print(f"overriding exists single contract, {symbol}{contract_date}")
+            df_contract.to_csv(single_contract_filepath, index=False)
+        self.df_contract_cache_dict = {}
 
     def get_roll_calendar(self, symbol) -> pd.DataFrame:
         if symbol not in self.df_roll_calendar_cache_dict:
@@ -186,7 +180,7 @@ class DataBlob(object):
     def get_data_continuous(self, symbol) -> pd.DataFrame:
         if symbol not in self.df_continuous_cache_dict:
             continuous_file_path = os.path.join(self.futures_continuous_dir, f"{symbol}.csv")
-            self.df_roll_calendar_cache_dict[symbol] = pd.read_csv(continuous_file_path, index_col='Date',
+            self.df_continuous_cache_dict[symbol] = pd.read_csv(continuous_file_path, index_col='Date',
                                                                    parse_dates=['Date'])
         return self.df_continuous_cache_dict[symbol]
 
@@ -257,15 +251,14 @@ class DataBlob(object):
         if self.strategy_parameters is None:
             df_strategy_parameters = pd.read_csv(self.strategy_parameters_config_file_path)
             dict_list = df_strategy_parameters.to_dict(orient='records')
-            # 构建新的字典，以 Name 列作为键，Value 列作为值
             self.strategy_parameters = {d['Name']: d['Value'] for d in dict_list}
         return self.strategy_parameters
 
     def run_strategy(self, strategy_class):
         s = strategy_class(self)
         if s.simulate():
-            df_forecast_dict = s.get_df_forecast_dict
-            df_combined_data_dict = s.get_df_combined_data_dict
+            df_forecast_dict = s.get_df_forecast_dict()
+            df_combined_data_dict = s.get_df_combined_data_dict()
             for symbol, df_forecast in df_forecast_dict.items():
                 df_forecast.to_csv(os.path.join(self.futures_forecast_dir, f"{symbol}.csv"))
             for name, df_combined in df_combined_data_dict.items():
@@ -274,6 +267,6 @@ class DataBlob(object):
         self.df_combined_cache_dict = {}
 
     def update_data(self):
-        self.update_single_contracts_in_portfolio()
+        # self.update_single_contracts_in_portfolio()
         self.update_roll_calendar_in_portfolio()
-        self.update_data_continuous_in_portfolio()
+        # self.update_data_continuous_in_portfolio()

@@ -20,7 +20,8 @@ def calculate_forecast(df_continuous, args):
     annual_return_price = (df_continuous['CurrentPrice'] - df_continuous['CarryPrice']) / (delta_days / 365.0)
     annual_price_diff_vol = daily_price_diff_vol * 16
     raw_carry = (annual_return_price / annual_price_diff_vol).rolling(window=smooth_days).mean()
-    forecast = (raw_carry * forecast_scalar).clip(-forecast_max, forecast_max)
+    forecast = raw_carry * forecast_scalar
     forecast[0] = 0 if numpy.isnan(forecast[0]) else forecast[0]
-    forecast = forecast.ffill().clip(-forecast_max, forecast_max)
+    forecast = forecast.ffill()
+    forecast = forecast.clip(-forecast_max, forecast_max)
     return forecast

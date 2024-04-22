@@ -29,6 +29,6 @@ csv_config_dict = dict(
 if __name__ == "__main__":
     data_source = DataSourceAkshare()
     data_blob = DataBlob(csv_config_dict, data_source)
-    data_blob.populate_single_contracts_in_portfolio()
+    # data_blob.populate_single_contracts_in_portfolio()
     data_blob.update_data()
-    data_blob.run_strategy(StrategyRobert)
+    # data_blob.run_strategy(StrategyRobert)

@@ -27,9 +27,9 @@ class StrategyRobert(object):
             self.portfolio.append(Position(symbol))
 
         # key: combined data type, Forecast, AdjustPrice...
-        self.df_combined_data_dict = None
+        self.df_combined_data_dict = {}
         # key: symbol, ES, CL...
-        self.df_forecast_dict = None
+        self.df_forecast_dict = {}
 
     def get_df_combined_data_dict(self):
         return self.df_combined_data_dict
