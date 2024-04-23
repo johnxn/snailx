@@ -1,5 +1,6 @@
 # coding=utf-8
 import pandas as pd
+from datetime import timedelta
 import os
 import numpy
 import util
@@ -11,7 +12,6 @@ class DataBlob(object):
         project_dir = util.get_project_dir()
         self.futures_single_contracts_dir = os.path.join(project_dir, csv_config_dict['futures_single_contracts_dir'])
         self.futures_continuous_dir = os.path.join(project_dir, csv_config_dict['futures_continuous_dir'])
-        self.futures_forecast_dir = os.path.join(project_dir, csv_config_dict['futures_forecast_dir'])
         self.futures_combined_dir = os.path.join(project_dir, csv_config_dict['futures_combined_dir'])
         self.futures_roll_calendar_dir = os.path.join(project_dir, csv_config_dict['futures_roll_calendar_dir'])
         self.portfolio_config_file_path = os.path.join(project_dir, csv_config_dict['portfolio_config_file_path'])
@@ -24,7 +24,6 @@ class DataBlob(object):
         self.df_roll_calendar_cache_dict = {}
         self.df_contract_cache_dict = {}
         self.df_continuous_cache_dict = {}
-        self.df_forecast_cache_dict = {}
         self.df_combined_cache_dict = {}
 
         self.strategy_rules = None
@@ -35,7 +34,6 @@ class DataBlob(object):
     def make_data_dirs(self):
         for d in [self.futures_single_contracts_dir,
                   self.futures_continuous_dir,
-                  self.futures_forecast_dir,
                   self.futures_combined_dir,
                   self.futures_roll_calendar_dir]:
             if not os.path.exists(d):
@@ -77,13 +75,14 @@ class DataBlob(object):
         if os.path.exists(single_contract_filepath):
             df_old = self.get_single_contract(symbol, contract_date)
             df_added = df[df.index > df_old.index[-1]]
+            df_added = df_added.drop_duplicates()
             if len(df_added) > 0:
                 print(f'add {len(df_added)} rows data for single contract {symbol}{contract_date}')
                 df = pd.concat([df_old, df_added])
-                df.to_csv(single_contract_filepath, index=False)
+                df.to_csv(single_contract_filepath, index=True)
         else:
             print(f"download contract data for single contract {symbol}{contract_date}")
-            df.to_csv(single_contract_filepath, index=False)
+            df.to_csv(single_contract_filepath, index=True)
 
     def update_single_contracts_in_portfolio(self):
         symbol_list = self.get_portfolio_symbol_list()
@@ -100,8 +99,26 @@ class DataBlob(object):
             single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
             if os.path.exists(single_contract_filepath):
                 print(f"overriding exists single contract, {symbol}{contract_date}")
-            df_contract.to_csv(single_contract_filepath, index=False)
+            df_contract.to_csv(single_contract_filepath, index=True)
         self.df_contract_cache_dict = {}
+    
+    def get_contract_date_list(self, symbol):
+        contract_date_list = []
+        for filename in os.listdir(os.path.join(self.futures_single_contracts_dir, symbol)):
+            if filename.endswith('.csv'):
+                contract_date_list.append(filename.split('.')[0])
+        return contract_date_list
+    
+    def get_start_and_end_date(self, symbol):
+        start_date = None
+        end_date = None
+        for contract_date in self.get_contract_date_list(symbol):
+            df = self.get_single_contract(symbol, contract_date)
+            if start_date is None or df.index[0] < start_date:
+                start_date = df.index[0]
+            if end_date is None or df.index[-1] > end_date:
+                end_date = df.index[-1]
+        return start_date, end_date
 
     def get_roll_calendar(self, symbol) -> pd.DataFrame:
         if symbol not in self.df_roll_calendar_cache_dict:
@@ -109,25 +126,31 @@ class DataBlob(object):
             self.df_roll_calendar_cache_dict[symbol] = pd.read_csv(roll_calendar_file_path, index_col='Date',
                                                                    parse_dates=['Date'])
         return self.df_roll_calendar_cache_dict[symbol]
+    
+    def build_roll_calendar_by_config(self, symbol, last_date=None):
+        pass
 
-    def build_roll_calendar_by_volume(self, symbol, last_date=None):
-        contract_date_list = []
-        for filename in os.listdir(os.path.join(self.futures_single_contracts_dir, symbol)):
-            if filename.endswith('.csv'):
-                contract_date_list.append(filename.split('.')[0])
+    def build_roll_calendar_by_volume(self, symbol, start_date=None, end_date=None):
+        if start_date and end_date:
+            print(f"generate new roll calendar for {symbol},  start_date {util.datetime_to_str(start_date)}, end_date {util.datetime_to_str(end_date)}")
+        contract_date_list = self.get_contract_date_list(symbol)
         df_volume = None
         for contract_date in contract_date_list:
             df = self.get_single_contract(symbol, contract_date)
-            if last_date is not None:
-                df = df[df.index > last_date]
-            df = df['volume']
-            if df_volume is None:
-                df_volume = df
-            else:
-                df_volume = pd.merge(df_volume, df, left_index=True, right_index=True, how='outer')
-            # 先随便给个名字, 避免merge的时候报错
-            df_volume.columns = list(range(len(df_volume.columns)))
-        df_volume.columns = contract_date_list
+            if start_date is not None:
+                df = df[df.index >= start_date]
+            if end_date is not None:
+                df = df[df.index < end_date]
+            if len(df) > 0:
+                df = df[['Volume']]
+                df.rename({'Volume':contract_date}, axis=1, inplace=True)
+                if df_volume is None:
+                    df_volume = df
+                else:
+                    df_volume = pd.merge(df_volume, df, left_index=True, right_index=True, how='outer')
+        if df_volume is None or len(df_volume.columns) < 2:
+            # print(f"no roll_calendar generated for {symbol}, start_date {util.datetime_to_str(start_date)}, end_date {util.datetime_to_str(end_date)}")
+            return None
 
         df_roll_calendar = df_volume.apply(lambda row: row.nlargest(2).index.tolist(), axis=1, result_type='expand')
         df_roll_calendar.columns = ['FirstContract', 'SecondContract']
@@ -144,38 +167,43 @@ class DataBlob(object):
                 df_roll_calendar.loc[date, 'CurrentContract'] = last_current_date
             last_carry_date, last_current_date = carry_date, current_date
 
-        return df_roll_calendar, df_volume
+        return df_roll_calendar
 
-    def update_roll_calendar_in_portfolio(self, auto_roll=True):
-        df_symbol = self.get_portfolio_config()
-        for _, row in df_symbol.iterrows():
-            symbol = row['Symbol']
-            if auto_roll:
-                self.build_roll_calendar(symbol)
+    def update_roll_calendar_in_portfolio(self):
+        for symbol in self.get_portfolio_symbol_list():
+            roll_calendar_file_path = os.path.join(self.futures_roll_calendar_dir, f"{symbol}.csv")
+            if not os.path.exists(roll_calendar_file_path):
+                start_date, end_date = self.get_start_and_end_date(symbol)
+                end_date += timedelta(days=1)
+
+                delta_days = timedelta(days=200)
+                begin_date = start_date
+                df_roll_calendar_section_list = []
+                while True:
+                    next_date = begin_date + delta_days
+                    if next_date >= end_date:
+                        next_date = end_date
+                    df_section = self.build_roll_calendar_by_volume(symbol, begin_date, next_date)
+                    if df_section is not None:
+                        df_roll_calendar_section_list.append(df_section)
+                    if next_date >= end_date:
+                        break
+                    begin_date = next_date
+                df_roll_calendar = pd.concat(df_roll_calendar_section_list)
+                df_roll_calendar.to_csv(roll_calendar_file_path)
             else:
-                carry_date = row['CarryContract']
-                current_date = row['CurrentContract']
-                self.build_roll_calendar(symbol, carry_date, current_date)
+                df_roll_calendar = self.get_roll_calendar(symbol)
+                start_date = df_roll_calendar.index[-1]
+                start_date += timedelta(days=1)
+                df_roll_calendar_added = self.build_roll_calendar_by_volume(symbol, start_date)
+                if df_roll_calendar_added and len(df_roll_calendar_added) > 0:
+                    print(f"update {len(df_roll_calendar_added)} rows of roll calendar for {symbol}")
+                    df_roll_calendar = pd.concat([df_roll_calendar, df_roll_calendar_added])
+                    df_roll_calendar.to_csv(roll_calendar_file_path)
         self.df_roll_calendar_cache_dict = {}
-
-    def build_roll_calendar(self, symbol, carry_date=None, current_date=None):
-        roll_calendar_file_path = os.path.join(self.futures_roll_calendar_dir, f"{symbol}.csv")
-        if not os.path.exists(roll_calendar_file_path):
-            df_roll_calendar = self.build_roll_calendar_by_volume(symbol)
-        else:
-            df_roll_calendar = self.get_roll_calendar(symbol)
-        last_date = df_roll_calendar.index[-1]
-        if carry_date is not None and current_date is not None:
-            # 用户指定了carry和current的contract
-            df_current = self.get_single_contract(symbol, current_date)
-            df_roll_calendar_added = pd.DataFrame({'CarryContract': carry_date, 'CurrentContract': current_date},
-                                                  index=df_current.index[df_current.index > last_date])
-        else:
-            df_roll_calendar_added = self.build_roll_calendar_by_volume(symbol, last_date)
-        if len(df_roll_calendar_added) > 0:
-            print(f"update {len(df_roll_calendar_added)} rows of roll calendar for {symbol}")
-            df_roll_calendar = pd.concat([df_roll_calendar, df_roll_calendar_added])
-            df_roll_calendar.to_csv(roll_calendar_file_path)
+    
+    def generate_roll_config_in_portfolio(self):
+        pass
 
     def get_data_continuous(self, symbol) -> pd.DataFrame:
         if symbol not in self.df_continuous_cache_dict:
@@ -187,33 +215,45 @@ class DataBlob(object):
     def build_data_continuous(self, symbol) -> pd.DataFrame:
         df_roll_calendar = self.get_roll_calendar(symbol)
         df_continuous = df_roll_calendar
+        df_continuous.drop(columns=['FirstContract', 'SecondContract'], inplace=True)
         new_columns = ['CarryPrice', 'CarryVolume', 'CurrentPrice', 'CurrentVolume']
         for column in new_columns:
             df_continuous[column] = None
-        last_current_date = None
+        last_current_contract_date = None
         for date, row in df_continuous.iterrows():
-            carry_date, current_date = row['CarryContract'], row['CurrentContract']
-            df_carry = self.get_single_contract(symbol, carry_date)
-            df_current = self.get_single_contract(symbol, current_date)
-            if last_current_date is not None and current_date != last_current_date:
-                df_current_last = self.get_single_contract(symbol, last_current_date)
-                spread = df_current.loc[date]['close'] - df_current_last.loc[date]['close']
+            carry_contract_date, current_contract_date = row['CarryContract'], row['CurrentContract']
+            df_carry = self.get_single_contract(symbol, carry_contract_date)
+            df_current = self.get_single_contract(symbol, current_contract_date)
+            if last_current_contract_date is not None and current_contract_date != last_current_contract_date:
+                df_current_last = self.get_single_contract(symbol, last_current_contract_date)
+                if date in df_current_last.index:
+                    spread = df_current.loc[date]['Close'] - df_current_last.loc[date]['Close']
+                else:
+                    print(f"missing {date} data for {symbol}{last_current_contract_date} while backjusting data!!!, current contract: {symbol}{current_contract_date}")
+                    spread = 0
                 df_continuous['AdjustPrice'] = df_continuous['AdjustPrice'] + spread
-            df_continuous.loc[date, 'CarryPrice'] = df_carry.loc[date, 'close']
-            df_continuous.loc[date, 'CarryVolume'] = df_carry.loc[date, 'volume']
-            df_continuous.loc[date, 'CurrentPrice'] = df_current.loc[date, 'close']
-            df_continuous.loc[date, 'CurrentVolume'] = df_current.loc[date, 'volume']
-            df_continuous.loc[date, 'AdjustPrice'] = df_continuous.loc[date, 'CurrentPrice']
-            last_current_date = current_date
+            if date in df_carry.index:
+                df_continuous.loc[date, 'CarryPrice'] = df_carry.loc[date, 'Close']
+                df_continuous.loc[date, 'CarryVolume'] = df_carry.loc[date, 'Volume']
+            else:
+                print(f"missing {date} data for carry contract {symbol}{carry_contract_date}")
+                df_continuous.loc[date, 'CarryPrice'] = numpy.nan
+                df_continuous.loc[date, 'CarryVolume'] = numpy.nan
+            if date in df_current.index:
+                df_continuous.loc[date, 'CurrentPrice'] = df_current.loc[date, 'Close']
+                df_continuous.loc[date, 'CurrentVolume'] = df_current.loc[date, 'Volume']
+            else:
+                print(f"missing {date} data for current contract {symbol}{current_contract_date}")
+                df_continuous.loc[date, 'CurrentPrice'] = numpy.nan
+                df_continuous.loc[date, 'CurrentVolume'] = numpy.nan
 
-        continuous_file_path = os.path.join(self.futures_continuous_dir, f"{symbol}.csv")
-        df_continuous.to_csv(continuous_file_path)
+            df_continuous.loc[date, 'AdjustPrice'] = df_continuous.loc[date, 'CurrentPrice']
+            last_current_contract_date = current_contract_date
+
         return df_continuous
 
     def update_data_continuous_in_portfolio(self):
-        df_symbol = self.get_portfolio_config()
-        for _, row in df_symbol.iterrows():
-            symbol = row['Symbol']
+        for symbol in self.get_portfolio_symbol_list():
             continuous_file_path = os.path.join(self.futures_continuous_dir, f"{symbol}.csv")
             if not os.path.exists(continuous_file_path):
                 df_continuous = self.build_data_continuous(symbol)
@@ -228,12 +268,6 @@ class DataBlob(object):
             df_continuous.to_csv(continuous_file_path, index=True)
         self.df_continuous_cache_dict = {}
 
-    def get_forecast(self, symbol) -> pd.DataFrame:
-        if symbol not in self.df_forecast_cache_dict:
-            self.df_forecast_cache_dict[symbol] = pd.read_csv(os.path.join(self.futures_forecast_dir, f"{symbol}.csv"),
-                                                              index_col='Date', parse_dates=['Date'])
-        return self.df_forecast_cache_dict[symbol]
-
     def get_combined_data(self, name) -> pd.DataFrame:
         if name not in self.df_combined_cache_dict:
             self.df_combined_cache_dict[name] = pd.read_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"),
@@ -242,14 +276,13 @@ class DataBlob(object):
 
     def get_strategy_rules(self) -> list:
         if self.strategy_rules is None:
-            df_strategy_rules = pd.read_csv(self.strategy_rules_config_file_path)
-            dict_list = df_strategy_rules.to_dict(orient='records')
-            self.strategy_rules = [{k: v for k, v in d.items()} for d in dict_list]
+            df_strategy_rules = pd.read_excel(self.strategy_rules_config_file_path)
+            self.strategy_rules = df_strategy_rules.to_dict(orient='records')
         return self.strategy_rules
 
     def get_strategy_parameters(self) -> dict:
         if self.strategy_parameters is None:
-            df_strategy_parameters = pd.read_csv(self.strategy_parameters_config_file_path)
+            df_strategy_parameters = pd.read_excel(self.strategy_parameters_config_file_path)
             dict_list = df_strategy_parameters.to_dict(orient='records')
             self.strategy_parameters = {d['Name']: d['Value'] for d in dict_list}
         return self.strategy_parameters
@@ -257,16 +290,12 @@ class DataBlob(object):
     def run_strategy(self, strategy_class):
         s = strategy_class(self)
         if s.simulate():
-            df_forecast_dict = s.get_df_forecast_dict()
             df_combined_data_dict = s.get_df_combined_data_dict()
-            for symbol, df_forecast in df_forecast_dict.items():
-                df_forecast.to_csv(os.path.join(self.futures_forecast_dir, f"{symbol}.csv"))
             for name, df_combined in df_combined_data_dict.items():
-                df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"))
-        self.df_forecast_cache_dict = {}
+                df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"), index=True)
         self.df_combined_cache_dict = {}
 
     def update_data(self):
-        # self.update_single_contracts_in_portfolio()
+        self.update_single_contracts_in_portfolio()
         self.update_roll_calendar_in_portfolio()
-        # self.update_data_continuous_in_portfolio()
+        self.update_data_continuous_in_portfolio()

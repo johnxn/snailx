@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import numpy
 import pandas as pd
 from data_blob import DataBlob
 import importlib
@@ -29,13 +29,13 @@ class StrategyRobert(object):
         # key: combined data type, Forecast, AdjustPrice...
         self.df_combined_data_dict = {}
         # key: symbol, ES, CL...
-        self.df_forecast_dict = {}
+        self.df_continuous_with_forecast_dict = {}
 
     def get_df_combined_data_dict(self):
         return self.df_combined_data_dict
 
-    def get_df_forecast_dict(self):
-        return self.df_forecast_dict
+    # def get_df_forecast_dict(self):
+    #     return self.df_continuous_with_forecast_dict
 
     def get_buy_costs_ex(self, buy_price, contract, position):
         return contract * (buy_price + position.slippage) * position.multiplier + contract * position.commission
@@ -44,7 +44,6 @@ class StrategyRobert(object):
         return contract * (sell_price - position.slippage) * position.multiplier - contract * position.commission
 
     def simulate(self):
-        self.calculate_forecast()
         self.generate_combined_data()
 
         strategy_parameters = self.data_blob.get_strategy_parameters()
@@ -54,8 +53,9 @@ class StrategyRobert(object):
         idm = strategy_parameters.get('instrument_diversification_multiplier', 1)
         fdm = strategy_parameters.get('forecast_diversification_multiplier', 1)
 
-        df_combined_adjust_close = self.df_combined_data_dict['AdjustClose']
+        df_combined_adjust_close = self.df_combined_data_dict['AdjustPrice']
         df_combined_forecast = self.df_combined_data_dict['Forecast']
+        df_price_val = self.df_combined_data_dict['PriceVol']
         df_combined_daily_contract = pd.DataFrame(0, index=df_combined_adjust_close.index,
                                                   columns=df_combined_adjust_close.columns)
         df_combined_daily_net_value = pd.DataFrame(0, index=df_combined_adjust_close.index,
@@ -73,12 +73,15 @@ class StrategyRobert(object):
                 daily_risk_target = annual_risk_target / 16.0
                 daily_position_capital = mark_to_market * daily_risk_target * position_weight
                 price = df_combined_adjust_close.loc[date][symbol]
-                daily_vol_value = df_combined_daily_contract.loc[date][symbol]
+                price_vol = df_price_val.loc[date][symbol]
                 forecast = df_combined_forecast.loc[date][symbol]
-                if daily_vol_value == 0:
+                if price_vol == 0:
                     need_contract = 0
                 else:
-                    need_contract = (daily_position_capital / daily_vol_value) * idm * (forecast / forecast_base)
+                    need_contract = (daily_position_capital / price_vol) * idm * (forecast / forecast_base)
+                import numpy
+                if numpy.isnan(need_contract):
+                    print("fuccccccccc")
                 need_contract = round(need_contract)
                 if need_contract < position.contract:
                     sell_contract = position.contract - need_contract
@@ -98,35 +101,50 @@ class StrategyRobert(object):
         self.df_combined_data_dict['DailyContracts'] = df_combined_daily_contract
         return True
 
-    def calculate_forecast(self):
+    def calculate_forecast(self, df_continuous):
         strategy_rules = self.data_blob.get_strategy_rules()
-        for symbol in self.data_blob.get_portfolio_symbol_list():
-            df_forecast = None
-            df_continuous = self.data_blob.get_data_continuous(symbol)
-            for parameters in strategy_rules:
-                rule_name = parameters['rule']
-                rule_weight = parameters['weight']
-                rule = importlib.import_module(f"rules.{rule_name}")
-                df = rule.calculate_forecast(df_continuous, parameters)
-                df = df * rule_weight
-                if df_forecast is None:
-                    df_forecast = df
-                else:
-                    df_forecast += df
-            self.df_forecast_dict[symbol] = df_forecast
+        strategy_parameters = self.data_blob.get_strategy_parameters()
+        df_forecast = None
+        for rule_args in strategy_rules:
+            rule_args.update(strategy_parameters)
+            rule_name = rule_args['rule']
+            rule_weight = rule_args['weight']
+            rule = importlib.import_module(f"rules.{rule_name}")
+            df = rule.calculate_forecast(df_continuous, rule_args)
+            df = df * rule_weight
+            if df_forecast is None:
+                df_forecast = df
+            else:
+                df_forecast += df
+        df_continuous['Forecast'] = df_forecast
+    
+    def calculate_daily_vol_value(self, df_continuous, multiplier):
+        strategy_parameters = self.data_blob.get_strategy_parameters()
+        volatility_lookback_window = int(strategy_parameters.get('volatility_lookback_window', 25))
+        daily_price_diff = df_continuous['AdjustPrice'].diff()
+        daily_price_diff_vol = daily_price_diff.rolling(window=volatility_lookback_window).std()
+        daily_price_diff_vol.iloc[0] = 0 if numpy.isnan(daily_price_diff_vol.iloc[0]) else daily_price_diff_vol.iloc[0]
+        daily_price_diff_vol = daily_price_diff_vol.ffill()
+        df_continuous['PriceVol'] = daily_price_diff_vol * multiplier
 
     def generate_combined_data(self):
-        symbol_list = self.data_blob.get_portfolio_symbol_list()
-        columns = self.df_forecast_dict[symbol_list[0]].columns
+        for symbol in self.data_blob.get_portfolio_symbol_list():
+            df_continuous = self.data_blob.get_data_continuous(symbol)
+            self.calculate_forecast(df_continuous)
+            self.calculate_daily_vol_value(df_continuous, 1)
+            self.df_continuous_with_forecast_dict[symbol] = df_continuous
+
+        symbol_list = list(self.df_continuous_with_forecast_dict.keys())
+        columns = self.df_continuous_with_forecast_dict[symbol_list[0]].columns
         for column in columns:
             df_combined = None
             for symbol in symbol_list:
-                df = self.df_forecast_dict[symbol]
-                df = df[column]
+                df = self.df_continuous_with_forecast_dict[symbol]
+                df = df[[column]]
                 if df_combined is None:
-                    df_combined = df[column]
+                    df_combined = df
                 else:
-                    df_combined = pd.merge(df_combined, df[column], left_index=True, right_index=True, how='inner')
-                df_combined.columns = list(range(df_combined.columns))
+                    df_combined = pd.merge(df_combined, df, left_index=True, right_index=True, how='inner')
+                df_combined.columns = list(range(len(df_combined.columns)))
             df_combined.columns = symbol_list
             self.df_combined_data_dict[column] = df_combined

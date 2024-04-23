@@ -17,6 +17,7 @@ def str_to_datetime(str):
 
 
 def generate_portfolio_config(portfolio_config_file_path):
+    portfolio_config_file_path = os.path.join(get_project_dir(), 'config/generated_portfolio_config.xlsx')
     if os.path.exists(portfolio_config_file_path):
         return
     data = {

@@ -5,6 +5,7 @@ import os
 import util
 import pandas as pd
 from data_source import DataSource
+import time
 
 china_market_list = ["CFFEX", "INE", "CZCE", "DCE", "SHFE", "GFEX"]
 
@@ -116,12 +117,20 @@ def generate_name_to_symbol_dict():
 class DataSourceAkshare(DataSource):
     def __init__(self):
         super().__init__()
-
+        self.fetch_interval = 1
+        self.last_fetch_time = None
 
     def download_single_contract(self, symbol, contract_date):
         # 把 202409 转成 2409
         try:
-            df = ak.futures_zh_daily_sina(symbol=f"{symbol}{str(contract_date)[2:]}")
+            while True:
+                current_time = time.time()
+                if self.last_fetch_time is None or current_time > self.last_fetch_time + self.fetch_interval:
+                    df = ak.futures_zh_daily_sina(symbol=f"{symbol}{str(contract_date)[2:]}")
+                    self.last_fetch_time = current_time
+                    break
+                else:
+                    time.sleep(self.fetch_interval)
         except Exception as ex:
             print(f"download single contract {symbol}{contract_date} failed, exception: {str(ex)}")
             return None
@@ -129,7 +138,10 @@ class DataSourceAkshare(DataSource):
         df = df[['date', 'open', 'high', 'low', 'close', 'volume']]
         df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
         df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
+        df = df.sort_values(by='Date')
         df.index = df["Date"]
+        df.drop_duplicates(inplace=True)
+        df.drop(columns=['Date'], inplace=True)
         return df
 
     def download_all_single_contracts(self, symbol_list):
@@ -212,6 +224,9 @@ class DataSourceAkshare(DataSource):
                 df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
                 df['Date'] = pd.to_datetime(df['Date'], format='%Y%m%d')
                 df = df.sort_values(by='Date')
+                df.index = df["Date"]
+                df.drop_duplicates(inplace=True)
+                df.drop(columns=['Date'], inplace=True)
                 symbol, contract_date = contract[:-4], '20' + str(contract[-4:])
                 if symbol not in symbol_list:
                     continue

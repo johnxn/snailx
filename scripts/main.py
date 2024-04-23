@@ -18,7 +18,6 @@ pd.set_option('display.width', None)  # 设置宽度不限制
 csv_config_dict = dict(
     futures_single_contracts_dir='data/china_futures/single_contracts',
     futures_continuous_dir='data/china_futures/continuous',
-    futures_forecast_dir='data/china_futures/forecast',
     futures_combined_dir='data/china_futures/combined',
     futures_roll_calendar_dir='data/china_futures/roll_calendar',
     portfolio_config_file_path='config/symbols_china_futures.xlsx',
@@ -30,5 +29,5 @@ if __name__ == "__main__":
     data_source = DataSourceAkshare()
     data_blob = DataBlob(csv_config_dict, data_source)
     # data_blob.populate_single_contracts_in_portfolio()
-    data_blob.update_data()
-    # data_blob.run_strategy(StrategyRobert)
+    # data_blob.update_data()
+    data_blob.run_strategy(StrategyRobert)
