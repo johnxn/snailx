@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import timedelta
 import os
 import numpy
+from matplotlib.pyplot import show
 import util
 from data_source import DataSource
 
@@ -98,8 +99,8 @@ class DataBlob(object):
         for (symbol, contract_date), df_contract in contracts_dict.items():
             single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
             if os.path.exists(single_contract_filepath):
-                print(f"overriding exists single contract, {symbol}{contract_date}")
-            df_contract.to_csv(single_contract_filepath, index=True)
+                print(f"single contract alreday exists, skipped..., {symbol}{contract_date}")
+                df_contract.to_csv(single_contract_filepath, index=True)
         self.df_contract_cache_dict = {}
     
     def get_contract_date_list(self, symbol):
@@ -131,8 +132,9 @@ class DataBlob(object):
         pass
 
     def build_roll_calendar_by_volume(self, symbol, start_date=None, end_date=None):
-        if start_date and end_date:
-            print(f"generate new roll calendar for {symbol},  start_date {util.datetime_to_str(start_date)}, end_date {util.datetime_to_str(end_date)}")
+        start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
+        end_date_str = util.datetime_to_str(end_date) if end_date is not None else "None"
+        print(f"generate new roll calendar for {symbol},  start_date {start_date_str}, end_date {end_date_str}")
         contract_date_list = self.get_contract_date_list(symbol)
         df_volume = None
         for contract_date in contract_date_list:
@@ -250,6 +252,9 @@ class DataBlob(object):
             df_continuous.loc[date, 'AdjustPrice'] = df_continuous.loc[date, 'CurrentPrice']
             last_current_contract_date = current_contract_date
 
+        if numpy.isnan(df_continuous.iloc[0]['AdjustPrice']):
+            df_continuous = df_continuous.bfill()
+
         return df_continuous
 
     def update_data_continuous_in_portfolio(self):
@@ -295,7 +300,7 @@ class DataBlob(object):
                 df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"), index=True)
         self.df_combined_cache_dict = {}
 
-    def update_data(self):
-        self.update_single_contracts_in_portfolio()
-        self.update_roll_calendar_in_portfolio()
-        self.update_data_continuous_in_portfolio()
+    def plot_daily_net_value(self):
+        df_daily_net_value = self.get_combined_data('DailyNetValue')
+        df_daily_net_value.plot()
+        show()

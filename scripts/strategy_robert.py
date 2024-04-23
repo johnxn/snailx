@@ -81,7 +81,7 @@ class StrategyRobert(object):
                     need_contract = (daily_position_capital / price_vol) * idm * (forecast / forecast_base)
                 import numpy
                 if numpy.isnan(need_contract):
-                    print("fuccccccccc")
+                    print(f"something is wrong!!! {symbol}, date {date}")
                 need_contract = round(need_contract)
                 if need_contract < position.contract:
                     sell_contract = position.contract - need_contract

@@ -1,6 +1,6 @@
 # coding=utf-8
-import akshare as ak
-# import abc as ak
+# import akshare as ak
+import abc as ak
 import os
 import util
 import pandas as pd
@@ -193,7 +193,6 @@ class DataSourceAkshare(DataSource):
                 if int(prefix + three_digit_contract_date) >= int(price_date_year_month):
                     four_digit_contract_date = f"{prefix[-1]}{three_digit_contract_date}"
                     return f"{symbol}{four_digit_contract_date}"
-            print('we are fucked')
 
         df['symbol'] = df.apply(transform_symbol, axis=1)
         return df
