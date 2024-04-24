@@ -32,6 +32,7 @@ class DataBlob(object):
         self.strategy_rules = None
         self.strategy_parameters = None
 
+        self.roll_by_config = False
 
         self.make_data_dirs()
 
@@ -75,6 +76,8 @@ class DataBlob(object):
         if (symbol, contract_date) in self.df_contract_cache_dict:
             return self.df_contract_cache_dict[(symbol, contract_date)]
         single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
+        if not os.path.exists(single_contract_filepath):
+            print(f"no single contarct for {symbol}{contract_date}")
         df = pd.read_csv(single_contract_filepath, index_col='Date', parse_dates=['Date'])
         self.df_contract_cache_dict[(symbol, contract_date)] = df
         return df
@@ -133,13 +136,14 @@ class DataBlob(object):
     def get_trade_calendar(self, symbol):
         if symbol not in self.df_trade_calendar_cahce_dict:
             df_trade_calendar = None
+            df_list = []
             for contract_date in self.get_contract_date_list(symbol):
                 df = self.get_single_contract(symbol, contract_date)
-                if df_trade_calendar is None:
-                    df_trade_calendar = df
-                else:
-                    df_trade_calendar = pd.merge(df_trade_calendar, df, left_index=True, right_index=True, how='outer')
-            df_trade_calendar.drop(df_trade_calendar.columns, axis=1, inplace=True)
+                df = df.drop(df.columns, axis=1)
+                df_list.append(df)
+            df_trade_calendar = pd.concat(df_list)
+            # fucking insane...
+            df_trade_calendar = df_trade_calendar.reset_index().drop_duplicates(subset='Date', keep='first').set_index('Date')
             self.df_trade_calendar_cahce_dict[symbol] = df_trade_calendar
         return self.df_trade_calendar_cahce_dict[symbol]
 
@@ -153,19 +157,38 @@ class DataBlob(object):
     def build_roll_calendar_by_config(self, symbol, start_date=None, end_date=None):
         symbol_info = self.get_portfolio_symbol_info(symbol)
         roll_offset = int(symbol_info['roll_offset'])
-        roll_cycle = [int(v) for v in symbol_info['roll_cycle'].split(',')]
+        roll_month_cycle = [int(v) for v in symbol_info['roll_cycle'].split(',')]
+        contract_month_cycle = [int(v) for v in symbol_info['contract_cycle'].split(',')]
         df_roll_calendar = self.get_trade_calendar(symbol)
+        if start_date is not None:
+            df_roll_calendar = df_roll_calendar[df_roll_calendar.index >= start_date]
+        if end_date is not None:
+            df_roll_calendar = df_roll_calendar[df_roll_calendar.index < end_date]
         new_columns = ['CarryContract', 'CurrentContract']
         for column in new_columns:
             df_roll_calendar[column] = None
-        # for date, _ in df_roll_calendar:
+        for date, _ in df_roll_calendar.iterrows():
+            preferred_contract_date = date - timedelta(days=roll_offset)
+            roll_year, preferred_month = preferred_contract_date.year, preferred_contract_date.month
+            roll_month = roll_month_cycle[0]
+            for candidate_month in roll_month_cycle:
+                if candidate_month <= preferred_month:
+                    roll_month = candidate_month
+            roll_month_index = contract_month_cycle.index(roll_month)
+            if roll_month_index == 0:
+                carry_year, carry_month = roll_year - 1, contract_month_cycle[-1]
+            else:
+                carry_year, carry_month = roll_year, contract_month_cycle[roll_month_index-1]
 
-
+            carry_contract_date = f"{carry_year}{carry_month:02d}"
+            current_contract_date = f"{roll_year}{roll_month:02d}"
+            df_roll_calendar.loc[date, 'CarryContract'] = int(carry_contract_date)
+            df_roll_calendar.loc[date, 'CurrentContract'] = int(current_contract_date)
+        return df_roll_calendar
 
     def build_roll_calendar_by_volume(self, symbol, start_date=None, end_date=None):
         start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
         end_date_str = util.datetime_to_str(end_date) if end_date is not None else "None"
-        print(f"generate new roll calendar for {symbol},  start_date {start_date_str}, end_date {end_date_str}")
         contract_date_list = self.get_contract_date_list(symbol)
         df_volume = None
         for contract_date in contract_date_list:
@@ -193,6 +216,15 @@ class DataBlob(object):
             lambda row: max(row['FirstContract'], row['SecondContract']), axis=1)
         df_roll_calendar.drop(['FirstContract', 'SecondContract'], axis=1, inplace=True)
         return df_roll_calendar
+    
+    def build_roll_calendar(self, symbol, start_date=None, end_date=None):
+        start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
+        end_date_str = util.datetime_to_str(end_date) if end_date is not None else "None"
+        print(f"generate new roll calendar for {symbol},  start_date {start_date_str}, end_date {end_date_str}")
+        if self.roll_by_config:
+            return self.build_roll_calendar_by_config(symbol, start_date, end_date)
+        else:
+            return self.build_roll_calendar_by_volume(symbol, start_date, end_date)
 
     def update_roll_calendar_in_portfolio(self):
         for symbol in self.get_portfolio_symbol_list():
@@ -208,7 +240,7 @@ class DataBlob(object):
                     next_date = begin_date + delta_days
                     if next_date >= end_date:
                         next_date = end_date
-                    df_section = self.build_roll_calendar_by_volume(symbol, begin_date, next_date)
+                    df_section = self.build_roll_calendar(symbol, begin_date, next_date)
                     if df_section is not None:
                         df_roll_calendar_section_list.append(df_section)
                     if next_date >= end_date:
@@ -219,8 +251,8 @@ class DataBlob(object):
                 df_roll_calendar = self.get_roll_calendar(symbol)
                 start_date = df_roll_calendar.index[-1]
                 start_date += timedelta(days=1)
-                df_roll_calendar_added = self.build_roll_calendar_by_volume(symbol, start_date)
-                if df_roll_calendar_added and len(df_roll_calendar_added) > 0:
+                df_roll_calendar_added = self.build_roll_calendar(symbol, start_date)
+                if df_roll_calendar_added is not None and len(df_roll_calendar_added) > 0:
                     print(f"update {len(df_roll_calendar_added)} rows of roll calendar for {symbol}")
                     df_roll_calendar = pd.concat([df_roll_calendar, df_roll_calendar_added])
             
@@ -238,8 +270,7 @@ class DataBlob(object):
     
     def generate_roll_config_in_portfolio(self):
         for symbol in self.get_portfolio_symbol_list():
-            df_roll_calendar = self.get_roll_calendar(symbol)
-            df_roll_config = df_roll_calendar
+            df_roll_config = self.get_roll_calendar(symbol)
             df_roll_config = df_roll_config.drop_duplicates(subset='CurrentContract', keep='first')
             df_roll_config['RollOffset'] = df_roll_config.index - pd.to_datetime(df_roll_config['CurrentContract'], format='%Y%m')
             df_roll_config = df_roll_config[['RollOffset', 'CurrentContract']]
@@ -256,7 +287,6 @@ class DataBlob(object):
     def build_data_continuous(self, symbol) -> pd.DataFrame:
         df_roll_calendar = self.get_roll_calendar(symbol)
         df_continuous = df_roll_calendar
-        df_continuous.drop(columns=['FirstContract', 'SecondContract'], inplace=True)
         new_columns = ['CarryPrice', 'CarryVolume', 'CurrentPrice', 'CurrentVolume']
         for column in new_columns:
             df_continuous[column] = None
