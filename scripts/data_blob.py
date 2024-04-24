@@ -163,11 +163,11 @@ class DataBlob(object):
 
         last_carry_date, last_current_date = None, None
         for date, row in df_roll_calendar.iterrows():
-            carry_date, current_date = row['CarryContract'], row['CurrentContract']
+            current_date = row['CurrentContract']
             if last_current_date is not None and current_date < last_current_date:
                 df_roll_calendar.loc[date, 'CarryContract'] = last_carry_date
                 df_roll_calendar.loc[date, 'CurrentContract'] = last_current_date
-            last_carry_date, last_current_date = carry_date, current_date
+            last_carry_date, last_current_date = df_roll_calendar.loc[date, 'CarryContract'], df_roll_calendar.loc[date, 'CurrentContract']
 
         return df_roll_calendar
 
@@ -205,7 +205,14 @@ class DataBlob(object):
         self.df_roll_calendar_cache_dict = {}
     
     def generate_roll_config_in_portfolio(self):
-        pass
+        for symbol in self.get_portfolio_symbol_list():
+            df_roll_calendar = self.get_roll_calendar(symbol)
+            df_roll_config = df_roll_calendar
+            df_roll_config = df_roll_config.drop_duplicates(subset='CurrentContract', keep='first')
+            df_roll_config['RollOffset'] = df_roll_config.index - pd.to_datetime(df_roll_config['CurrentContract'], format='%Y%m')
+            df_roll_config = df_roll_config[['RollOffset', 'CurrentContract']]
+            df_roll_config.to_csv(os.path.join(self.futures_roll_calendar_dir, f"{symbol}_config.csv"), index=True)
+
 
     def get_data_continuous(self, symbol) -> pd.DataFrame:
         if symbol not in self.df_continuous_cache_dict:
