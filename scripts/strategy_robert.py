@@ -78,7 +78,7 @@ class StrategyRobert(object):
                 if price_vol == 0:
                     need_contract = 0
                 else:
-                    need_contract = (daily_position_capital / price_vol) * idm * (forecast / forecast_base)
+                    need_contract = (daily_position_capital / price_vol) * idm * fdm * (forecast / forecast_base)
                 import numpy
                 if numpy.isnan(need_contract):
                     print(f"something is wrong!!! {symbol}, date {date}")

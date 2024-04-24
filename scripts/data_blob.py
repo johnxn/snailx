@@ -25,11 +25,13 @@ class DataBlob(object):
         self.df_contract_cache_dict = {}
         self.df_continuous_cache_dict = {}
         self.df_combined_cache_dict = {}
+        self.df_trade_calendar_cahce_dict = {}
         self.df_portfolio_config = None
         self.portfolio = None
 
         self.strategy_rules = None
         self.strategy_parameters = None
+
 
         self.make_data_dirs()
 
@@ -105,6 +107,7 @@ class DataBlob(object):
             for contract_date in contract_date_list:
                 self.update_single_contract(symbol, contract_date)
         self.df_contract_cache_dict = {}
+        self.df_trade_calendar_cahce_dict = {}
 
     def populate_single_contracts_in_portfolio(self):
         symbol_list = self.get_portfolio_symbol_list()
@@ -124,15 +127,21 @@ class DataBlob(object):
         return contract_date_list
     
     def get_start_and_end_date(self, symbol):
-        start_date = None
-        end_date = None
-        for contract_date in self.get_contract_date_list(symbol):
-            df = self.get_single_contract(symbol, contract_date)
-            if start_date is None or df.index[0] < start_date:
-                start_date = df.index[0]
-            if end_date is None or df.index[-1] > end_date:
-                end_date = df.index[-1]
-        return start_date, end_date
+        df_trade_calendar = self.get_trade_calendar(symbol)
+        return df_trade_calendar.index[0], df_trade_calendar.index[-1]
+    
+    def get_trade_calendar(self, symbol):
+        if symbol not in self.df_trade_calendar_cahce_dict:
+            df_trade_calendar = None
+            for contract_date in self.get_contract_date_list(symbol):
+                df = self.get_single_contract(symbol, contract_date)
+                if df_trade_calendar is None:
+                    df_trade_calendar = df
+                else:
+                    df_trade_calendar = pd.merge(df_trade_calendar, df, left_index=True, right_index=True, how='outer')
+            df_trade_calendar.drop(df_trade_calendar.columns, axis=1, inplace=True)
+            self.df_trade_calendar_cahce_dict[symbol] = df_trade_calendar
+        return self.df_trade_calendar_cahce_dict[symbol]
 
     def get_roll_calendar(self, symbol) -> pd.DataFrame:
         if symbol not in self.df_roll_calendar_cache_dict:
@@ -141,8 +150,17 @@ class DataBlob(object):
                                                                    parse_dates=['Date'])
         return self.df_roll_calendar_cache_dict[symbol]
     
-    def build_roll_calendar_by_config(self, symbol, last_date=None):
-        pass
+    def build_roll_calendar_by_config(self, symbol, start_date=None, end_date=None):
+        symbol_info = self.get_portfolio_symbol_info(symbol)
+        roll_offset = int(symbol_info['roll_offset'])
+        roll_cycle = [int(v) for v in symbol_info['roll_cycle'].split(',')]
+        df_roll_calendar = self.get_trade_calendar(symbol)
+        new_columns = ['CarryContract', 'CurrentContract']
+        for column in new_columns:
+            df_roll_calendar[column] = None
+        # for date, _ in df_roll_calendar:
+
+
 
     def build_roll_calendar_by_volume(self, symbol, start_date=None, end_date=None):
         start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
@@ -173,6 +191,7 @@ class DataBlob(object):
             lambda row: min(row['FirstContract'], row['SecondContract']), axis=1)
         df_roll_calendar['CurrentContract'] = df_roll_calendar.apply(
             lambda row: max(row['FirstContract'], row['SecondContract']), axis=1)
+        df_roll_calendar.drop(['FirstContract', 'SecondContract'], axis=1, inplace=True)
         return df_roll_calendar
 
     def update_roll_calendar_in_portfolio(self):
