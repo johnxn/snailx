@@ -1,11 +1,16 @@
 # coding=utf-8
-# import akshare as ak
-import abc as ak
+import akshare as ak
+# import abc as ak
 import os
 import util
 import pandas as pd
 from data_source import DataSource
 import time
+
+pd.set_option('display.max_columns', None)  # 显示所有列
+pd.set_option('display.max_rows', None)
+pd.set_option('display.width', None)  # 设置宽度不限制
+
 
 china_market_list = ["CFFEX", "INE", "CZCE", "DCE", "SHFE", "GFEX"]
 
@@ -113,6 +118,16 @@ def generate_name_to_symbol_dict():
     content += "}\n"
     return content
 
+def get_futures_fees_info():
+    df_fees_info = ak.futures_fees_info()
+    df_fees_info = df_fees_info.drop_duplicates(subset='品种')
+    df_fees_info = df_fees_info[['交易所', '合约', '品种', '合约乘数', '做多1手保证金', '最小变动价位']]
+    df_fees_info['品种'] = df_fees_info['品种'].str.upper()
+    df_fees_info = df_fees_info.sort_values(by='品种')
+    print(df_fees_info)
+    return df_fees_info
+
+
 
 class DataSourceAkshare(DataSource):
     def __init__(self):
@@ -204,7 +219,6 @@ class DataSourceAkshare(DataSource):
     def build_all_single_contracts_from_raw_data(self, symbol_list):
         df_single_contract_dict = {}
         for market in china_market_list:
-            print(f"getting {market} ...")
             df_list = []
             for filename in os.listdir(self.temp_data_dir):
                 if filename.startswith(market):
@@ -242,6 +256,8 @@ class DataSourceAkshare(DataSource):
             contract_date_list.remove('0')
         contract_date_list = [f'20{contract_date}' for contract_date in contract_date_list]
         return contract_date_list
+    
 
 if __name__ == "__main__":
-    print(generate_name_to_symbol_dict())
+    # print(generate_name_to_symbol_dict())
+    get_futures_fees_info()

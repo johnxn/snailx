@@ -21,11 +21,12 @@ class DataBlob(object):
 
         self.data_source = data_source
 
-        self.df_portfolio_config = None
         self.df_roll_calendar_cache_dict = {}
         self.df_contract_cache_dict = {}
         self.df_continuous_cache_dict = {}
         self.df_combined_cache_dict = {}
+        self.df_portfolio_config = None
+        self.portfolio = None
 
         self.strategy_rules = None
         self.strategy_parameters = None
@@ -49,9 +50,21 @@ class DataBlob(object):
         if self.df_portfolio_config is None:
             self.df_portfolio_config = pd.read_excel(self.portfolio_config_file_path)
         return self.df_portfolio_config
+    
+    def get_portfolio(self) -> list:
+        if self.portfolio is None:
+            df_portfolio_config = self.get_portfolio_config()
+            self.portfolio = df_portfolio_config.to_dict(orient='records')
+        return self.portfolio
 
-    def get_portfolio_symbol_list(self):
-        return list(self.get_portfolio_config()['Symbol'])
+    def get_portfolio_symbol_list(self) -> list:
+        return [v['symbol'] for v in self.get_portfolio()]
+    
+    def get_portfolio_symbol_info(self, symbol) -> dict:
+        for info in self.get_portfolio():
+            if info['symbol'] == symbol:
+                return info
+        return None
     
     def get_single_contract_file_path(self, symbol, contract_date):
         return os.path.join(self.futures_single_contracts_dir, f"{symbol}/{contract_date}.csv")
@@ -151,7 +164,7 @@ class DataBlob(object):
                 else:
                     df_volume = pd.merge(df_volume, df, left_index=True, right_index=True, how='outer')
         if df_volume is None or len(df_volume.columns) < 2:
-            # print(f"no roll_calendar generated for {symbol}, start_date {util.datetime_to_str(start_date)}, end_date {util.datetime_to_str(end_date)}")
+            print(f"no roll_calendar generated for {symbol}, start_date {start_date_str}, end_date {end_date_str}")
             return None
 
         df_roll_calendar = df_volume.apply(lambda row: row.nlargest(2).index.tolist(), axis=1, result_type='expand')
@@ -160,15 +173,6 @@ class DataBlob(object):
             lambda row: min(row['FirstContract'], row['SecondContract']), axis=1)
         df_roll_calendar['CurrentContract'] = df_roll_calendar.apply(
             lambda row: max(row['FirstContract'], row['SecondContract']), axis=1)
-
-        last_carry_date, last_current_date = None, None
-        for date, row in df_roll_calendar.iterrows():
-            current_date = row['CurrentContract']
-            if last_current_date is not None and current_date < last_current_date:
-                df_roll_calendar.loc[date, 'CarryContract'] = last_carry_date
-                df_roll_calendar.loc[date, 'CurrentContract'] = last_current_date
-            last_carry_date, last_current_date = df_roll_calendar.loc[date, 'CarryContract'], df_roll_calendar.loc[date, 'CurrentContract']
-
         return df_roll_calendar
 
     def update_roll_calendar_in_portfolio(self):
@@ -192,7 +196,6 @@ class DataBlob(object):
                         break
                     begin_date = next_date
                 df_roll_calendar = pd.concat(df_roll_calendar_section_list)
-                df_roll_calendar.to_csv(roll_calendar_file_path)
             else:
                 df_roll_calendar = self.get_roll_calendar(symbol)
                 start_date = df_roll_calendar.index[-1]
@@ -201,7 +204,17 @@ class DataBlob(object):
                 if df_roll_calendar_added and len(df_roll_calendar_added) > 0:
                     print(f"update {len(df_roll_calendar_added)} rows of roll calendar for {symbol}")
                     df_roll_calendar = pd.concat([df_roll_calendar, df_roll_calendar_added])
-                    df_roll_calendar.to_csv(roll_calendar_file_path)
+            
+            # 不往旧的合约roll
+            last_carry_date, last_current_date = None, None
+            for date, row in df_roll_calendar.iterrows():
+                current_date = row['CurrentContract']
+                if last_current_date is not None and current_date < last_current_date:
+                    df_roll_calendar.loc[date, 'CarryContract'] = last_carry_date
+                    df_roll_calendar.loc[date, 'CurrentContract'] = last_current_date
+                last_carry_date, last_current_date = df_roll_calendar.loc[date, 'CarryContract'], df_roll_calendar.loc[date, 'CurrentContract']
+            df_roll_calendar.to_csv(roll_calendar_file_path)
+
         self.df_roll_calendar_cache_dict = {}
     
     def generate_roll_config_in_portfolio(self):

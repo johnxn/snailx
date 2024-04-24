@@ -6,13 +6,13 @@ import importlib
 
 
 class Position(object):
-    def __init__(self, symbol):
+    def __init__(self, symbol, multiplier, commision, slippage=0):
         self.symbol = symbol
-        self.multiplier = 1
-        self.commission = 0
-        self.slippage = 0
-        self.contract = 0
+        self.multiplier = multiplier
+        self.commission = commision
+        self.slippage = slippage
 
+        self.contract = 0
         self.cash = 0
         self.asset_value = 0
 
@@ -21,10 +21,12 @@ class StrategyRobert(object):
     def __init__(self, data_blob: DataBlob):
         self.data_blob = data_blob
 
-        self.portfolio = []
-        self.symbol_list = self.data_blob.get_portfolio_symbol_list()
-        for symbol in self.symbol_list:
-            self.portfolio.append(Position(symbol))
+        self.position_list = []
+        for info in self.data_blob.get_portfolio():
+            symbol = info['symbol']
+            multiplier = info['multiplier']
+            commision = info['commision']
+            self.position_list.append(Position(symbol, multiplier, commision))
 
         # key: combined data type, Forecast, AdjustPrice...
         self.df_combined_data_dict = {}
@@ -34,9 +36,6 @@ class StrategyRobert(object):
     def get_df_combined_data_dict(self):
         return self.df_combined_data_dict
 
-    # def get_df_forecast_dict(self):
-    #     return self.df_continuous_with_forecast_dict
-
     def get_buy_costs_ex(self, buy_price, contract, position):
         return contract * (buy_price + position.slippage) * position.multiplier + contract * position.commission
 
@@ -44,6 +43,7 @@ class StrategyRobert(object):
         return contract * (sell_price - position.slippage) * position.multiplier - contract * position.commission
 
     def simulate(self):
+        self.calculate_extra_data()
         self.generate_combined_data()
 
         strategy_parameters = self.data_blob.get_strategy_parameters()
@@ -67,9 +67,9 @@ class StrategyRobert(object):
             if df_combined_forecast.loc[date].isna().any():
                 continue
             mark_to_market = capital
-            for position in self.portfolio:
+            for position in self.position_list:
                 symbol = position.symbol
-                position_weight = 1.0 / len(self.symbol_list)
+                position_weight = 1.0 / len(self.position_list)
                 daily_risk_target = annual_risk_target / 16.0
                 daily_position_capital = mark_to_market * daily_risk_target * position_weight
                 price = df_combined_adjust_close.loc[date][symbol]
@@ -100,6 +100,15 @@ class StrategyRobert(object):
         self.df_combined_data_dict['DailyNetValue'] = df_combined_daily_net_value
         self.df_combined_data_dict['DailyContracts'] = df_combined_daily_contract
         return True
+    
+    def calculate_extra_data(self):
+        for position in self.position_list:
+            symbol = position.symbol
+            multiplier = position.multiplier
+            df_continuous = self.data_blob.get_data_continuous(symbol)
+            self.calculate_forecast(df_continuous)
+            self.calculate_daily_vol_value(df_continuous, multiplier)
+            self.df_continuous_with_forecast_dict[symbol] = df_continuous
 
     def calculate_forecast(self, df_continuous):
         strategy_rules = self.data_blob.get_strategy_rules()
@@ -128,13 +137,7 @@ class StrategyRobert(object):
         df_continuous['PriceVol'] = daily_price_diff_vol * multiplier
 
     def generate_combined_data(self):
-        for symbol in self.data_blob.get_portfolio_symbol_list():
-            df_continuous = self.data_blob.get_data_continuous(symbol)
-            self.calculate_forecast(df_continuous)
-            self.calculate_daily_vol_value(df_continuous, 1)
-            self.df_continuous_with_forecast_dict[symbol] = df_continuous
-
-        symbol_list = list(self.df_continuous_with_forecast_dict.keys())
+        symbol_list = [position.symbol for position in self.position_list]
         columns = self.df_continuous_with_forecast_dict[symbol_list[0]].columns
         for column in columns:
             df_combined = None
