@@ -338,9 +338,15 @@ class DataBlob(object):
         self.df_continuous_cache_dict = {}
 
     def get_combined_data(self, name) -> pd.DataFrame:
+        dtype_dict = {
+            'CarryContract' : str,
+            'CurrentContract' : str,
+            'DailyContracts' : int,
+        }
         if name not in self.df_combined_cache_dict:
             self.df_combined_cache_dict[name] = pd.read_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"),
-                                                            index_col='Date', parse_dates=['Date'])
+                                                            index_col='Date', parse_dates=['Date'],
+                                                            dtype=dtype_dict.get(name, float))
         return self.df_combined_cache_dict[name]
 
     def get_strategy_rules(self) -> list:
@@ -379,6 +385,19 @@ class DataBlob(object):
             for name, df_combined in df_combined_data_dict.items():
                 df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"), index=True)
         self.df_combined_cache_dict = {}
+
+    def get_latest_operation_signals(self):
+        combined_names = ['DailyContracts', 'CurrentContract', 'CarryContract', 'AdjustPrice',  'Forecast']
+        df_list = []
+        signal_date = None
+        for name in combined_names:
+            df = self.get_combined_data(name)
+            df = df[df.index == df.index[-1]]
+            signal_date = df.index[0]
+            df_list.append(df)
+        df_signal = pd.concat(df_list)
+        df_signal.index = combined_names
+        return signal_date, df_signal
 
     def plot_simulated_daily_net_value(self):
         df_daily_net_value = self.get_combined_data('DailyNetValue')
