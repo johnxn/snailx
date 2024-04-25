@@ -20,6 +20,7 @@ csv_config_dict = dict(
     futures_continuous_dir='data/output/backtest2/continuous',
     futures_combined_dir='data/output/backtest2/combined',
     futures_roll_calendar_dir='data/output/backtest2/roll_calendar',
+    daily_account_value_file_path='data/output/backtest2/daily_account_value.csv',
     portfolio_config_file_path='config/symbols_china_futures.xlsx',
     strategy_rules_config_file_path='config/strategy_rules.xlsx',
     strategy_parameters_config_file_path='config/strategy_parameters.xlsx',
@@ -33,5 +34,5 @@ if __name__ == "__main__":
     # data_blob.update_roll_calendar_in_portfolio()
     # data_blob.generate_roll_config_in_portfolio()
     # data_blob.update_data_continuous_in_portfolio()
-    # data_blob.run_strategy(StrategyRobert)
-    data_blob.plot_daily_net_value()
+    data_blob.run_strategy(StrategyRobert)
+    data_blob.plot_simulated_daily_net_value()

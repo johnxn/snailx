@@ -42,7 +42,11 @@ class StrategyRobert(object):
     def get_sell_reward_ex(self, sell_price, contract, position):
         return contract * (sell_price - position.slippage) * position.multiplier - contract * position.commission
 
-    def simulate(self):
+    def simulate(self, df_daily_account_value=None):
+        """
+        如果df_daily_account_value不为None，就是实盘了, mark_to_market读取的就是df_daily_account_value的每日数据。
+        df_daily_account_value应该从broker, 比如futu获取。
+        """
         self.calculate_extra_data()
         self.generate_combined_data()
 
@@ -64,9 +68,14 @@ class StrategyRobert(object):
         df_combined_adjust_close = df_combined_adjust_close.shift(-1)
         df_combined_adjust_close = df_combined_adjust_close.ffill()
         for date in df_combined_forecast.index:
-            if df_combined_forecast.loc[date].isna().any():
-                continue
-            mark_to_market = capital
+            prev_date = df_combined_forecast.index.asof(date)
+            mark_to_market = capital + df_combined_daily_net_value.loc[prev_date].sum()
+            if df_daily_account_value is not None:
+                if date < df_daily_account_value.index[0]:
+                    continue
+                if date in df_daily_account_value.index:
+                    mark_to_market = df_daily_account_value.loc[date]['NetValue']
+
             for position in self.position_list:
                 symbol = position.symbol
                 position_weight = 1.0 / len(self.position_list)
@@ -94,8 +103,7 @@ class StrategyRobert(object):
                 net_value = position.asset_value + position.cash
                 df_combined_daily_contract.loc[date, symbol] = need_contract
                 df_combined_daily_net_value.loc[date, symbol] = net_value
-                mark_to_market += net_value
-        df_combined_daily_net_value['combined'] = df_combined_daily_net_value.sum(axis=1)
+        df_combined_daily_net_value['combined'] =  df_combined_daily_net_value.sum(axis=1)
         self.df_combined_data_dict['DailyNetValue'] = df_combined_daily_net_value
         self.df_combined_data_dict['DailyContracts'] = df_combined_daily_contract
         return True

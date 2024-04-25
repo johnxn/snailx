@@ -18,6 +18,7 @@ class DataBlob(object):
         self.portfolio_config_file_path = os.path.join(project_dir, csv_config_dict['portfolio_config_file_path'])
         self.strategy_rules_config_file_path = os.path.join(project_dir, csv_config_dict['strategy_rules_config_file_path'])
         self.strategy_parameters_config_file_path = os.path.join(project_dir, csv_config_dict['strategy_parameters_config_file_path'])
+        self.daily_account_value_file_path = os.path.join(project_dir, csv_config_dict['daily_account_value_file_path'])
 
         self.data_source = data_source
 
@@ -27,6 +28,7 @@ class DataBlob(object):
         self.df_combined_cache_dict = {}
         self.df_trade_calendar_cahce_dict = {}
         self.df_portfolio_config = None
+        self.df_daily_account_value = None
         self.portfolio = None
 
         self.strategy_rules = None
@@ -353,16 +355,35 @@ class DataBlob(object):
             dict_list = df_strategy_parameters.to_dict(orient='records')
             self.strategy_parameters = {d['Name']: d['Value'] for d in dict_list}
         return self.strategy_parameters
+    
+    def update_daily_account_value(self):
+        pass
+    
+    def get_daily_account_value(self):
+        if self.df_daily_account_value is None:
+            if os.path.exists(self.daily_account_value_file_path):
+                self.df_daily_account_value = pd.read_csv(self.daily_account_value_file_path, index_col='Date', parse_dates=['Date'])
+        return self.df_daily_account_value
+
+    def plot_daily_account_value(self):
+        df_daily_value = self.get_daily_account_value()
+        if df_daily_value is not None:
+            df_daily_value.plot()
+            show()
 
     def run_strategy(self, strategy_class):
         s = strategy_class(self)
-        if s.simulate():
+        df_daily_account_value = self.get_daily_account_value()
+        if s.simulate(df_daily_account_value):
             df_combined_data_dict = s.get_df_combined_data_dict()
             for name, df_combined in df_combined_data_dict.items():
                 df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"), index=True)
         self.df_combined_cache_dict = {}
 
-    def plot_daily_net_value(self):
+    def plot_simulated_daily_net_value(self):
         df_daily_net_value = self.get_combined_data('DailyNetValue')
+        df_account_value = self.get_daily_account_value()
+        if df_account_value is not None:
+            df_daily_net_value = df_daily_net_value[df_daily_net_value.index >= df_account_value.index[0]]
         df_daily_net_value.plot()
         show()
