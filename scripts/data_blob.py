@@ -89,8 +89,7 @@ class DataBlob(object):
         single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
         df = self.data_source.download_single_contract(symbol, contract_date)
         if df is None:
-            print(f"update single contract {symbol}{contract_date} failed")
-            return
+            raise Exception(f"update single contract {symbol}{contract_date} failed")
         if os.path.exists(single_contract_filepath):
             df_old = self.get_single_contract(symbol, contract_date)
             df_added = df[df.index > df_old.index[-1]]
@@ -151,7 +150,8 @@ class DataBlob(object):
         if symbol not in self.df_roll_calendar_cache_dict:
             roll_calendar_file_path = os.path.join(self.futures_roll_calendar_dir, f"{symbol}.csv")
             self.df_roll_calendar_cache_dict[symbol] = pd.read_csv(roll_calendar_file_path, index_col='Date',
-                                                                   parse_dates=['Date'])
+                                                                   parse_dates=['Date'],
+                                                                   dtype={'CarryContract': str, 'CurrentContract': str})
         return self.df_roll_calendar_cache_dict[symbol]
     
     def build_roll_calendar_by_config(self, symbol, start_date=None, end_date=None):
@@ -182,8 +182,8 @@ class DataBlob(object):
 
             carry_contract_date = f"{carry_year}{carry_month:02d}"
             current_contract_date = f"{roll_year}{roll_month:02d}"
-            df_roll_calendar.loc[date, 'CarryContract'] = int(carry_contract_date)
-            df_roll_calendar.loc[date, 'CurrentContract'] = int(current_contract_date)
+            df_roll_calendar.loc[date, 'CarryContract'] = carry_contract_date
+            df_roll_calendar.loc[date, 'CurrentContract'] = current_contract_date
         return df_roll_calendar
 
     def build_roll_calendar_by_volume(self, symbol, start_date=None, end_date=None):
@@ -281,7 +281,9 @@ class DataBlob(object):
         if symbol not in self.df_continuous_cache_dict:
             continuous_file_path = os.path.join(self.futures_continuous_dir, f"{symbol}.csv")
             self.df_continuous_cache_dict[symbol] = pd.read_csv(continuous_file_path, index_col='Date',
-                                                                   parse_dates=['Date'])
+                                                                   parse_dates=['Date'],
+                                                                    dtype={'CarryContract': str, 'CurrentContract': str})
+
         return self.df_continuous_cache_dict[symbol]
 
     def build_data_continuous(self, symbol) -> pd.DataFrame:
@@ -329,16 +331,7 @@ class DataBlob(object):
     def update_data_continuous_in_portfolio(self):
         for symbol in self.get_portfolio_symbol_list():
             continuous_file_path = os.path.join(self.futures_continuous_dir, f"{symbol}.csv")
-            if not os.path.exists(continuous_file_path):
-                df_continuous = self.build_data_continuous(symbol)
-            else:
-                df_continuous = self.get_data_continuous(symbol)
-                df_roll_calendar = self.get_roll_calendar(symbol)
-                if len(df_roll_calendar) > len(df_continuous):
-                    df_continuous = self.build_data_continuous(symbol)
-                else:
-                    print(f'no new data for symbol: {symbol}')
-                    continue
+            df_continuous = self.build_data_continuous(symbol)
             df_continuous.to_csv(continuous_file_path, index=True)
         self.df_continuous_cache_dict = {}
 

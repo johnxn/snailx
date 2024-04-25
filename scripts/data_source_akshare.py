@@ -133,23 +133,23 @@ class DataSourceAkshare(DataSource):
     def __init__(self):
         super().__init__()
         self.fetch_interval = 1
-        self.last_fetch_time = None
 
     def download_single_contract(self, symbol, contract_date):
         # 把 202409 转成 2409
-        try:
-            while True:
-                current_time = time.time()
-                if self.last_fetch_time is None or current_time > self.last_fetch_time + self.fetch_interval:
-                    df = ak.futures_zh_daily_sina(symbol=f"{symbol}{str(contract_date)[2:]}")
-                    self.last_fetch_time = current_time
-                    break
-                else:
-                    time.sleep(self.fetch_interval)
-        except Exception as ex:
-            print(f"download single contract {symbol}{contract_date} failed, exception: {str(ex)}")
-            return None
+        max_try_times = 999
+        cur_try_times = 0
+        df = None
+        while cur_try_times < max_try_times:
+            try:
+                df = ak.futures_zh_daily_sina(symbol=f"{symbol}{str(contract_date)[2:]}")
+                break
+            except Exception as ex:
+                print(f"download single contract {symbol}{contract_date} failed, exception: {str(ex)}, retrying...")
+                cur_try_times += 1
+                time.sleep(self.fetch_interval * cur_try_times)
 
+        if df is None:
+            return None
         df = df[['date', 'open', 'high', 'low', 'close', 'volume']]
         df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
         df['Date'] = pd.to_datetime(df['Date'], format="%Y-%m-%d")
