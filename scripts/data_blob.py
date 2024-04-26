@@ -7,9 +7,14 @@ from matplotlib.pyplot import show
 import util
 from data_source import DataSource
 
+class ERollMethod(object):
+    ByVolume = 1,
+    ByConfig = 2,
+    WithoutCarry = 3
+
 
 class DataBlob(object):
-    def __init__(self, csv_config_dict, data_source: DataSource):
+    def __init__(self, csv_config_dict, data_source: DataSource, roll_method=ERollMethod.ByVolume):
         project_dir = util.get_project_dir()
         self.futures_single_contracts_dir = os.path.join(project_dir, csv_config_dict['futures_single_contracts_dir'])
         self.futures_continuous_dir = os.path.join(project_dir, csv_config_dict['futures_continuous_dir'])
@@ -34,7 +39,8 @@ class DataBlob(object):
         self.strategy_rules = None
         self.strategy_parameters = None
 
-        self.roll_by_config = False
+        self.roll_method = roll_method
+
 
         self.make_data_dirs()
 
@@ -187,10 +193,8 @@ class DataBlob(object):
             df_roll_calendar.loc[date, 'CarryContract'] = carry_contract_date
             df_roll_calendar.loc[date, 'CurrentContract'] = current_contract_date
         return df_roll_calendar
-
-    def build_roll_calendar_by_volume(self, symbol, start_date=None, end_date=None):
-        start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
-        end_date_str = util.datetime_to_str(end_date) if end_date is not None else "None"
+    
+    def merge_contract_volume(self, symbol, start_date=None, end_date=None):
         contract_date_list = self.get_contract_date_list(symbol)
         df_volume = None
         for contract_date in contract_date_list:
@@ -206,6 +210,12 @@ class DataBlob(object):
                     df_volume = df
                 else:
                     df_volume = pd.merge(df_volume, df, left_index=True, right_index=True, how='outer')
+        return df_volume
+
+    def build_roll_calendar_by_volume(self, symbol, start_date=None, end_date=None):
+        start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
+        end_date_str = util.datetime_to_str(end_date) if end_date is not None else "None"
+        df_volume = self.merge_contract_volume(symbol, start_date, end_date)
         if df_volume is None or len(df_volume.columns) < 2:
             print(f"no roll_calendar generated for {symbol}, start_date {start_date_str}, end_date {end_date_str}")
             return None
@@ -219,14 +229,29 @@ class DataBlob(object):
         df_roll_calendar.drop(['FirstContract', 'SecondContract'], axis=1, inplace=True)
         return df_roll_calendar
     
+    def build_roll_calendar_without_carry(self, symbol, start_date=None, end_date=None):
+        start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
+        end_date_str = util.datetime_to_str(end_date) if end_date is not None else "None"
+        df_volume = self.merge_contract_volume(symbol, start_date, end_date)
+        if df_volume is None or len(df_volume.columns) < 2:
+            print(f"no roll_calendar generated for {symbol}, start_date {start_date_str}, end_date {end_date_str}")
+            return None
+
+        df_roll_calendar = df_volume.apply(lambda row: row.nlargest(1).index.tolist(), axis=1, result_type='expand')
+        df_roll_calendar.columns = ['CurrentContract']
+        df_roll_calendar['CarryContract'] = df_roll_calendar['CurrentContract']
+        return df_roll_calendar
+
     def build_roll_calendar(self, symbol, start_date=None, end_date=None):
         start_date_str = util.datetime_to_str(start_date) if start_date is not None else "None"
         end_date_str = util.datetime_to_str(end_date) if end_date is not None else "None"
         print(f"generate new roll calendar for {symbol},  start_date {start_date_str}, end_date {end_date_str}")
-        if self.roll_by_config:
-            return self.build_roll_calendar_by_config(symbol, start_date, end_date)
-        else:
+        if self.roll_method == ERollMethod.ByVolume:
             return self.build_roll_calendar_by_volume(symbol, start_date, end_date)
+        elif self.roll_method == ERollMethod.ByConfig:
+            return self.build_roll_calendar_by_config(symbol, start_date, end_date)
+        elif self.roll_method == ERollMethod.WithoutCarry:
+            return self.build_roll_calendar_without_carry(symbol, start_date, end_date)
 
     def update_roll_calendar_in_portfolio(self):
         for symbol in self.get_portfolio_symbol_list():

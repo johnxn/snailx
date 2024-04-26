@@ -2,6 +2,7 @@
 
 import pandas as pd
 from data_blob import DataBlob
+from data_blob import ERollMethod
 from data_source_akshare import DataSourceAkshare
 from data_source_norgate import DataSourceNorgate
 from strategy_robert import StrategyRobert
@@ -21,8 +22,8 @@ def run_china_market():
         futures_roll_calendar_dir='data/output/backtest2/roll_calendar',
         daily_account_value_file_path='data/output/backtest2/daily_account_value.csv',
         portfolio_config_file_path='config/symbols_china_futures.xlsx',
-        strategy_rules_config_file_path='config/strategy_rules.xlsx',
-        strategy_parameters_config_file_path='config/strategy_parameters.xlsx',
+        strategy_rules_config_file_path='config/strategy_rules_china.xlsx',
+        strategy_parameters_config_file_path='config/strategy_parameters_china.xlsx',
     )
     data_source = DataSourceAkshare()
     data_blob = DataBlob(csv_config_dict, data_source)
@@ -46,7 +47,7 @@ def run_us_market():
         strategy_parameters_config_file_path='config/strategy_parameters.xlsx',
     )
     data_source = DataSourceNorgate()
-    data_blob = DataBlob(csv_config_dict, data_source)
+    data_blob = DataBlob(csv_config_dict, data_source, roll_method=ERollMethod.WithoutCarry)
     data_blob.update_single_contracts_in_portfolio()
     data_blob.update_roll_calendar_in_portfolio()
     data_blob.update_data_continuous_in_portfolio()

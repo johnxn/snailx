@@ -13,8 +13,8 @@ class Position(object):
         self.slippage = slippage
 
         self.contract = 0
-        self.cash = 0
-        self.asset_value = 0
+        self.cash = 0.0
+        self.asset_value = 0.0
 
 
 class StrategyRobert(object):
@@ -62,19 +62,27 @@ class StrategyRobert(object):
         df_price_val = self.df_combined_data_dict['PriceVol']
         df_combined_daily_contract = pd.DataFrame(0, index=df_combined_adjust_close.index,
                                                   columns=df_combined_adjust_close.columns)
-        df_combined_daily_net_value = pd.DataFrame(0, index=df_combined_adjust_close.index,
+        df_combined_daily_net_value = pd.DataFrame(0.0, index=df_combined_adjust_close.index,
                                                    columns=df_combined_adjust_close.columns)
         # weird, but we don't want look ahead bias,
         df_combined_adjust_close = df_combined_adjust_close.shift(-1)
         df_combined_adjust_close = df_combined_adjust_close.ffill()
+        if df_daily_account_value is None:
+            start_date = df_combined_forecast.index[0]
+        else:
+            start_date = df_daily_account_value.index[0]
+            capital = df_daily_account_value.iloc[0]['NetValue']
         for date in df_combined_forecast.index:
-            prev_date = df_combined_forecast.index.asof(date)
-            mark_to_market = capital + df_combined_daily_net_value.loc[prev_date].sum()
-            if df_daily_account_value is not None:
-                if date < df_daily_account_value.index[0]:
-                    continue
-                if date in df_daily_account_value.index:
-                    mark_to_market = df_daily_account_value.loc[date]['NetValue']
+            if date < start_date:
+                continue
+            prev_date_index = df_combined_forecast.index.get_loc(date) - 1
+            prev_date_index = prev_date_index if prev_date_index > 0 else 0
+            prev_date = df_combined_forecast.index[prev_date_index]
+            # 如果用户提供了每日资金曲线，直接用它作为mark to market
+            if df_daily_account_value is not None and date in df_daily_account_value.index:
+                mark_to_market = df_daily_account_value.loc[date]['NetValue']
+            else:
+                mark_to_market = capital + df_combined_daily_net_value.loc[prev_date].sum()
 
             for position in self.position_list:
                 symbol = position.symbol
