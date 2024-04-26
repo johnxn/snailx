@@ -412,16 +412,28 @@ class DataBlob(object):
         self.df_combined_cache_dict = {}
 
     def get_latest_operation_signals(self):
-        combined_names = ['DailyContracts', 'CurrentContract', 'CarryContract', 'AdjustPrice',  'Forecast']
         df_list = []
+        names = []
+        df_daily_contracts = self.get_combined_data('DailyContracts')
+        if len(df_daily_contracts) >= 2:
+            df_diff_contracts = pd.DataFrame([df_daily_contracts.iloc[-1] - df_daily_contracts.iloc[-2]], columns=df_daily_contracts.columns)
+            df_list.append(df_diff_contracts)
+            names.append('DiffContracts')
+
+        df_combined_list = []
+        combined_names = ['DailyContracts', 'CurrentContract', 'CarryContract', 'AdjustPrice',  'Forecast']
         signal_date = None
         for name in combined_names:
             df = self.get_combined_data(name)
             df = df[df.index == df.index[-1]]
             signal_date = df.index[0]
-            df_list.append(df)
+            df_combined_list.append(df)
+        
+        df_list += df_combined_list
+        names += combined_names
+
         df_signal = pd.concat(df_list)
-        df_signal.index = combined_names
+        df_signal.index = names
         return signal_date, df_signal
 
     def plot_simulated_daily_net_value(self):
