@@ -21,9 +21,9 @@ def run_china_market():
         futures_combined_dir='data/output/backtest2/combined',
         futures_roll_calendar_dir='data/output/backtest2/roll_calendar',
         daily_account_value_file_path='data/output/backtest2/daily_account_value.csv',
-        portfolio_config_file_path='config/symbols_china_futures.xlsx',
-        strategy_rules_config_file_path='config/strategy_rules_china.xlsx',
-        strategy_parameters_config_file_path='config/strategy_parameters_china.xlsx',
+        portfolio_config_file_path='config/symbols_china_futures.csv',
+        strategy_rules_config_file_path='config/strategy_rules_china.csv',
+        strategy_parameters_config_file_path='config/strategy_parameters_china.csv',
     )
     data_source = DataSourceAkshare()
     data_blob = DataBlob(csv_config_dict, data_source)
@@ -42,9 +42,9 @@ def run_us_market():
         futures_combined_dir='data/output/us_ewmac/combined',
         futures_roll_calendar_dir='data/output/us_ewmac/roll_calendar',
         daily_account_value_file_path='data/output/us_ewmac/daily_account_value.csv',
-        portfolio_config_file_path='config/symbols_us_futures.xlsx',
-        strategy_rules_config_file_path='config/strategy_rules.xlsx',
-        strategy_parameters_config_file_path='config/strategy_parameters.xlsx',
+        portfolio_config_file_path='config/symbols_us_futures.csv',
+        strategy_rules_config_file_path='config/strategy_rules.csv',
+        strategy_parameters_config_file_path='config/strategy_parameters.csv',
     )
     data_source = DataSourceNorgate()
     data_blob = DataBlob(csv_config_dict, data_source, roll_method=ERollMethod.WithoutCarry)
