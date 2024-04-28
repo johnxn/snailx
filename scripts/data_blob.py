@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import timedelta
 import os
 import numpy
-from matplotlib.pyplot import show
+import matplotlib.pyplot as plt
 import util
 from data_source import DataSource
 
@@ -400,7 +400,7 @@ class DataBlob(object):
         df_daily_value = self.get_daily_account_value()
         if df_daily_value is not None:
             df_daily_value.plot()
-            show()
+            plt.show()
 
     def run_strategy(self, strategy_class):
         s = strategy_class(self)
@@ -439,7 +439,77 @@ class DataBlob(object):
     def plot_simulated_daily_net_value(self):
         df_daily_net_value = self.get_combined_data('DailyNetValue')
         df_account_value = self.get_daily_account_value()
+        capital = self.get_strategy_parameters()['capital']
         if df_account_value is not None:
             df_daily_net_value = df_daily_net_value[df_daily_net_value.index >= df_account_value.index[0]]
-        df_daily_net_value.plot()
-        show()
+            capital = df_account_value.iloc[0]['NetValue']
+
+        df_daily_net_value_withou_combined = df_daily_net_value.drop('combined', axis=1)
+        print("return correlation matrix")
+        print(df_daily_net_value_withou_combined.corr())
+
+        df_combined_adjust_price = self.get_combined_data('AdjustPrice')
+        print("price correlation matrix")
+        print(df_combined_adjust_price.corr())
+
+        df_daily_net_value_withou_combined.plot()
+        plt.show()
+
+        df_daily_net_value['NetValue'] = df_daily_net_value['combined'] + capital
+        df_daily_net_value['DailyReturn'] = df_daily_net_value['NetValue'].pct_change()
+        rolling_annual_return = df_daily_net_value['DailyReturn'].rolling(window=252).apply(lambda x: ((1 + x.mean()) ** 252) - 1, raw=True)
+        rolling_annual_volatility = df_daily_net_value['DailyReturn'].rolling(window=252).std() * numpy.sqrt(252)
+        rolling_sharpe_ratio = rolling_annual_return  / rolling_annual_volatility
+
+        df_daily_net_value['MaxValue'] = df_daily_net_value['NetValue'].rolling(window=252).max()
+        df_daily_net_value['Drawdown'] = (df_daily_net_value['NetValue'] - df_daily_net_value['MaxValue']) / df_daily_net_value['MaxValue']
+        rolling_max_drawdown = df_daily_net_value['Drawdown'].rolling(window=252).min()
+
+        # 计算净值的累积收益率
+        cumulative_return = df_daily_net_value['NetValue'][-1] / df_daily_net_value['NetValue'][0]
+        # 计算年化收益率
+        years = (df_daily_net_value.index[-1] - df_daily_net_value.index[0]).days / 365.0
+        annual_return = (cumulative_return ** (1 / years)) - 1
+
+        # 计算年化波动率
+        annual_volatility = df_daily_net_value['DailyReturn'].std() * numpy.sqrt(252)
+        sharpe_ratio = annual_return / annual_volatility
+        print(f"total annual return: {annual_return}, sharpe ratio: {sharpe_ratio}")
+
+        # 绘制图表
+        plt.figure(figsize=(10, 6))
+
+        # 绘制滚动年化收益率
+        plt.subplot(2, 2, 1)
+        rolling_annual_return.plot(color='blue')
+        plt.title('Rolling Annual Return')
+        plt.xlabel('Date')
+        plt.ylabel('Return')
+
+        # 绘制滚动年化波动率
+        plt.subplot(2, 2, 2)
+        rolling_annual_volatility.plot(color='green')
+        plt.title('Rolling Annual Volatility')
+        plt.xlabel('Date')
+        plt.ylabel('Volatility')
+
+        # 绘制滚动夏普比率
+        plt.subplot(2, 2, 3)
+        rolling_sharpe_ratio.plot(color='red')
+        plt.title('Rolling Sharpe Ratio')
+        plt.xlabel('Date')
+        plt.ylabel('Sharpe Ratio')
+
+        # 绘制滚动最大回撤
+        plt.subplot(2, 2, 4)
+        rolling_max_drawdown.plot(color='purple')
+        plt.title('Rolling Max Drawdown')
+        plt.xlabel('Date')
+        plt.ylabel('Drawdown')
+
+        plt.tight_layout()  # 自动调整子图布局，防止重叠
+        plt.suptitle('Performance Metrics', fontsize=16)  # 添加总标题
+        plt.show()
+
+
+
