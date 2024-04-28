@@ -29,15 +29,15 @@ def generate_portfolio_config(portfolio_config_file_path):
     df = pd.DataFrame(data)
     df.to_csv(portfolio_config_file_path, index=False)
 
-def excel_to_csv(excel_file_path):
-    csv_file_path = excel_file_path.split('.')[0] + '.csv'
-    df = pd.read_excel(excel_file_path)
-    df.to_csv(csv_file_path, index=False)
+def convert_excel_to_csv():
+    config_dir = os.path.join(get_project_dir(), 'config')
+    for excel_file_name in os.listdir(config_dir):
+        if excel_file_name.endswith('.xlsx'):
+            file_path = os.path.join(config_dir, excel_file_name)
+            csv_file_path = file_path.split('.')[0] + '.csv'
+            df = pd.read_excel(file_path)
+            df.to_csv(csv_file_path, index=False)
 
 if __name__ == "__main__":
-    config_dir = os.path.join(get_project_dir(), 'config')
-    for file_name in os.listdir(config_dir):
-        file_path = os.path.join(config_dir, file_name)
-        excel_to_csv(file_path)
-
+    convert_excel_to_csv()
 
