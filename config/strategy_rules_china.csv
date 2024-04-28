@@ -1,0 +1,5 @@
+rule,fast_window,slow_window,forecast_scalar,smooth_window,weight
+ewmac,16.0,64.0,3.75,,0.2
+ewmac,32.0,128.0,2.65,,0.1
+ewmac,64.0,256.0,1.87,,0.2
+carry,,,30.0,90.0,0.5

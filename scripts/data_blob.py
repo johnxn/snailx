@@ -59,7 +59,7 @@ class DataBlob(object):
 
     def get_portfolio_config(self) -> pd.DataFrame:
         if self.df_portfolio_config is None:
-            self.df_portfolio_config = pd.read_excel(self.portfolio_config_file_path)
+            self.df_portfolio_config = pd.read_csv(self.portfolio_config_file_path)
         return self.df_portfolio_config
     
     def get_portfolio(self) -> list:
@@ -376,13 +376,13 @@ class DataBlob(object):
 
     def get_strategy_rules(self) -> list:
         if self.strategy_rules is None:
-            df_strategy_rules = pd.read_excel(self.strategy_rules_config_file_path)
+            df_strategy_rules = pd.read_csv(self.strategy_rules_config_file_path)
             self.strategy_rules = df_strategy_rules.to_dict(orient='records')
         return self.strategy_rules
 
     def get_strategy_parameters(self) -> dict:
         if self.strategy_parameters is None:
-            df_strategy_parameters = pd.read_excel(self.strategy_parameters_config_file_path)
+            df_strategy_parameters = pd.read_csv(self.strategy_parameters_config_file_path)
             dict_list = df_strategy_parameters.to_dict(orient='records')
             self.strategy_parameters = {d['Name']: d['Value'] for d in dict_list}
         return self.strategy_parameters

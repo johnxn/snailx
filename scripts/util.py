@@ -17,7 +17,7 @@ def str_to_datetime(str):
 
 
 def generate_portfolio_config(portfolio_config_file_path):
-    portfolio_config_file_path = os.path.join(get_project_dir(), 'config/generated_portfolio_config.xlsx')
+    portfolio_config_file_path = os.path.join(get_project_dir(), 'config/generated_portfolio_config.csv')
     if os.path.exists(portfolio_config_file_path):
         return
     data = {
@@ -27,6 +27,17 @@ def generate_portfolio_config(portfolio_config_file_path):
         'CurrentContract': ['202409', '202409', '202409'],
     }
     df = pd.DataFrame(data)
-    df.to_excel(portfolio_config_file_path, index=False)
+    df.to_csv(portfolio_config_file_path, index=False)
+
+def excel_to_csv(excel_file_path):
+    csv_file_path = excel_file_path.split('.')[0] + '.csv'
+    df = pd.read_excel(excel_file_path)
+    df.to_csv(csv_file_path, index=False)
+
+if __name__ == "__main__":
+    config_dir = os.path.join(get_project_dir(), 'config')
+    for file_name in os.listdir(config_dir):
+        file_path = os.path.join(config_dir, file_name)
+        excel_to_csv(file_path)
 
 
