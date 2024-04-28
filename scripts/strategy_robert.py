@@ -6,10 +6,10 @@ import importlib
 
 
 class Position(object):
-    def __init__(self, symbol, multiplier, commision, slippage=0):
+    def __init__(self, symbol, multiplier, commission, slippage=0):
         self.symbol = symbol
         self.multiplier = multiplier
-        self.commission = commision
+        self.commission = commission
         self.slippage = slippage
 
         self.contract = 0
@@ -25,8 +25,8 @@ class StrategyRobert(object):
         for info in self.data_blob.get_portfolio():
             symbol = info['symbol']
             multiplier = info['multiplier']
-            commision = info['commision']
-            self.position_list.append(Position(symbol, multiplier, commision))
+            commission = info['commission']
+            self.position_list.append(Position(symbol, multiplier, commission))
 
         # key: combined data type, Forecast, AdjustPrice...
         self.df_combined_data_dict = {}
