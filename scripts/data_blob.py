@@ -311,9 +311,8 @@ class DataBlob(object):
     def generate_roll_config_in_portfolio(self):
         for symbol in self.get_portfolio_symbol_list():
             df_roll_config = self.get_roll_calendar(symbol)
-            df_roll_config = df_roll_config.drop_duplicates(subset='CurrentContract', keep='first')
-            df_roll_config['RollOffset'] = df_roll_config.index - pd.to_datetime(df_roll_config['CurrentContract'], format='%Y%m')
-            df_roll_config = df_roll_config[['RollOffset', 'CurrentContract']]
+            df_roll_config = df_roll_config.drop_duplicates(subset='CurrentContract', keep='last')
+            df_roll_config = df_roll_config[['CurrentContract', 'CarryContract']]
             df_roll_config.to_csv(os.path.join(self.futures_roll_calendar_dir, f"{symbol}_config.csv"), index=True)
 
 
