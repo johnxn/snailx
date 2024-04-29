@@ -2,9 +2,9 @@
 
 import pandas as pd
 from data_blob import DataBlob
-from data_blob import ERollMethod
 from data_source_akshare import DataSourceAkshare
 from data_source_norgate import DataSourceNorgate
+from futu_api.futu_broker import FutuDataBroker
 from strategy_robert import StrategyRobert
 import mailer
 import util
@@ -26,7 +26,7 @@ def run_china_market():
         strategy_parameters_config_file_path='config/strategy_parameters_china.csv',
     )
     data_source = DataSourceAkshare()
-    data_blob = DataBlob(csv_config_dict, data_source)
+    data_blob = DataBlob(csv_config_dict, data_source, None)
     data_blob.update_single_contracts_in_portfolio()
     data_blob.update_roll_calendar_in_portfolio()
     data_blob.update_data_continuous_in_portfolio()
@@ -47,15 +47,19 @@ def run_us_market():
         strategy_parameters_config_file_path='config/strategy_parameters.csv',
     )
     data_source = DataSourceNorgate()
-    data_blob = DataBlob(csv_config_dict, data_source, roll_method=ERollMethod.WithoutCarry)
+    data_broker = FutuDataBroker()
+    data_blob = DataBlob(csv_config_dict, data_source, data_broker)
+    data_blob.update_daily_account_value()
     data_blob.update_single_contracts_in_portfolio()
+    # data_blob.generate_roll_calendar_in_portfolio(by_volume=False)
     data_blob.update_roll_calendar_in_portfolio()
     data_blob.update_data_continuous_in_portfolio()
     data_blob.run_strategy(StrategyRobert)
     signal_date, df_signal = data_blob.get_latest_operation_signals()
     mailer.send_mail(subject=f"US Futures {util.datetime_to_str(signal_date)}", content=df_signal.to_html(index=True))
+    data_broker.destroy()
 
 
 if __name__ == "__main__":
     run_us_market()
-    run_china_market()
+    # run_china_market()

@@ -1,3 +1,4 @@
 .idea
 __pycache__
 /config/mail_config.csv
+/config/futu_config.csv

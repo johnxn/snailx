@@ -9,9 +9,7 @@ import pandas as pd
 def get_config():
     mail_config_file_path = os.path.join(util.get_project_dir(), 'config/mail_config.csv')
     df_mail_config = pd.read_csv(mail_config_file_path)
-    dict_list = df_mail_config.to_dict(orient='records')
-    mail_config = {d['Name']: d['Value'] for d in dict_list}
-    return mail_config
+    return util.df_config_to_dict(df_mail_config)
 
 
 def send_mail(subject='SNAIL Notification', content='Hello Snail!'):

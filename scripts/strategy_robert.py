@@ -60,7 +60,9 @@ class StrategyRobert(object):
                                                   columns=df_combined_forecast.columns)
         df_combined_daily_net_value = pd.DataFrame(0.0, index=df_combined_forecast.index,
                                                    columns=df_combined_forecast.columns)
-        df_daily_account_value = df_daily_account_value.reindex(df_combined_forecast.index).ffill().fillna(0)
+        merged_index = df_combined_forecast.index.union(df_daily_account_value.index)
+        df_daily_account_value = df_daily_account_value.reindex(merged_index).ffill().fillna(0)
+        df_daily_account_value = df_daily_account_value.reindex(df_combined_forecast.index)
         for date in df_combined_forecast.index:
 
             # 这里或许要改成，用操作日当天的mark to market？

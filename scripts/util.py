@@ -16,6 +16,12 @@ def str_to_datetime(str):
     return pd.to_datetime(str)
 
 
+def df_config_to_dict(df_config):
+    dict_list = df_config.to_dict(orient='records')
+    config_dict = {d['Name']: d['Value'] for d in dict_list}
+    return config_dict
+
+
 def generate_portfolio_config(portfolio_config_file_path):
     portfolio_config_file_path = os.path.join(get_project_dir(), 'config/generated_portfolio_config.csv')
     if os.path.exists(portfolio_config_file_path):
