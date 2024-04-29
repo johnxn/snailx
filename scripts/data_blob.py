@@ -1,6 +1,6 @@
 # coding=utf-8
 import pandas as pd
-from datetime import timedelta
+from datetime import timedelta, datetime
 import os
 import numpy
 import matplotlib.pyplot as plt
@@ -86,6 +86,7 @@ class DataBlob(object):
         single_contract_filepath = self.get_single_contract_file_path(symbol, contract_date)
         if not os.path.exists(single_contract_filepath):
             print(f"no single contarct for {symbol}{contract_date}")
+            return None
         df = pd.read_csv(single_contract_filepath, index_col='Date', parse_dates=['Date'])
         self.df_contract_cache_dict[(symbol, contract_date)] = df
         return df
@@ -164,9 +165,12 @@ class DataBlob(object):
     
     def build_roll_calendar_by_config(self, symbol, start_date=None, end_date=None):
         symbol_info = self.get_portfolio_symbol_info(symbol)
-        roll_offset = int(symbol_info['roll_offset'])
-        roll_month_cycle = [int(v) for v in symbol_info['roll_cycle'].split(',')]
-        contract_month_cycle = [int(v) for v in symbol_info['contract_cycle'].split(',')]
+        roll_offset_days = int(symbol_info['roll_offset_days'])
+        expiry_offset_days = int(symbol_info['expiry_offset_days'])
+        roll_offset_days += expiry_offset_days
+        roll_cycle = [int(v) for v in symbol_info['roll_cycle'].split(',')]
+        contract_cycle = [int(v) for v in symbol_info['contract_cycle'].split(',')]
+        carry_offset = int(symbol_info['carry_offset'])
         df_roll_calendar = self.get_trade_calendar(symbol)
         if start_date is not None:
             df_roll_calendar = df_roll_calendar[df_roll_calendar.index >= start_date]
@@ -176,20 +180,29 @@ class DataBlob(object):
         for column in new_columns:
             df_roll_calendar[column] = None
         for date, _ in df_roll_calendar.iterrows():
-            preferred_contract_date = date - timedelta(days=roll_offset)
-            roll_year, preferred_month = preferred_contract_date.year, preferred_contract_date.month
-            roll_month = roll_month_cycle[0]
-            for candidate_month in roll_month_cycle:
-                if candidate_month <= preferred_month:
-                    roll_month = candidate_month
-            roll_month_index = contract_month_cycle.index(roll_month)
-            if roll_month_index == 0:
-                carry_year, carry_month = roll_year - 1, contract_month_cycle[-1]
-            else:
-                carry_year, carry_month = roll_year, contract_month_cycle[roll_month_index-1]
+            current_year = None
+            current_month = None
+            for add_year in range(-1, 2):
+                is_found = False
+                for candidate_month in roll_cycle:
+                    candidate_year = date.year + add_year
+                    roll_date = datetime(candidate_year, candidate_month, 1) + timedelta(days=roll_offset_days)
+                    if date < roll_date:
+                        current_year = candidate_year
+                        current_month = candidate_month
+                        is_found = True
+                        break
+                if is_found:
+                    break
+            if current_year is None or current_month is None:
+                raise(f"can't find CurrentContract for {symbol} on {date}")
 
+            current_month_index = contract_cycle.index(current_month)
+            carry_month_index = current_month_index + carry_offset
+            carry_year = current_year + carry_month_index // len(contract_cycle)
+            carry_month = contract_cycle[carry_month_index % len(contract_cycle)]
             carry_contract_date = f"{carry_year}{carry_month:02d}"
-            current_contract_date = f"{roll_year}{roll_month:02d}"
+            current_contract_date = f"{current_year}{current_month:02d}"
             df_roll_calendar.loc[date, 'CarryContract'] = carry_contract_date
             df_roll_calendar.loc[date, 'CurrentContract'] = current_contract_date
         return df_roll_calendar
@@ -221,12 +234,12 @@ class DataBlob(object):
             return None
 
         df_roll_calendar = df_volume.apply(lambda row: row.nlargest(2).index.tolist(), axis=1, result_type='expand')
-        df_roll_calendar.columns = ['FirstContract', 'SecondContract']
-        df_roll_calendar['CarryContract'] = df_roll_calendar.apply(
-            lambda row: min(row['FirstContract'], row['SecondContract']), axis=1)
-        df_roll_calendar['CurrentContract'] = df_roll_calendar.apply(
-            lambda row: max(row['FirstContract'], row['SecondContract']), axis=1)
-        df_roll_calendar.drop(['FirstContract', 'SecondContract'], axis=1, inplace=True)
+        df_roll_calendar.columns = ['CurrentContract', 'CarryContract']
+        # df_roll_calendar['CarryContract'] = df_roll_calendar.apply(
+        #     lambda row: min(row['FirstContract'], row['SecondContract']), axis=1)
+        # df_roll_calendar['CurrentContract'] = df_roll_calendar.apply(
+        #     lambda row: max(row['FirstContract'], row['SecondContract']), axis=1)
+        # df_roll_calendar.drop(['FirstContract', 'SecondContract'], axis=1, inplace=True)
         return df_roll_calendar
     
     def build_roll_calendar_without_carry(self, symbol, start_date=None, end_date=None):
@@ -324,6 +337,9 @@ class DataBlob(object):
             carry_contract_date, current_contract_date = row['CarryContract'], row['CurrentContract']
             df_carry = self.get_single_contract(symbol, carry_contract_date)
             df_current = self.get_single_contract(symbol, current_contract_date)
+            if df_carry is None or df_current is None:
+                print(f"missing contract data for {symbol}{carry_contract_date}, {symbol}{current_contract_date}, skipping {date}")
+                continue
             if last_current_contract_date is not None and current_contract_date != last_current_contract_date:
                 df_current_last = self.get_single_contract(symbol, last_current_contract_date)
                 if date in df_current_last.index:
@@ -405,10 +421,13 @@ class DataBlob(object):
     def run_strategy(self, strategy_class):
         s = strategy_class(self)
         df_daily_account_value = self.get_daily_account_value()
-        if s.simulate(df_daily_account_value):
-            df_combined_data_dict = s.get_df_combined_data_dict()
-            for name, df_combined in df_combined_data_dict.items():
-                df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"), index=True)
+        if df_daily_account_value is not None:
+            s.go_live(df_daily_account_value)
+        else:
+            s.simulate()
+        df_combined_data_dict = s.get_df_combined_data_dict()
+        for name, df_combined in df_combined_data_dict.items():
+            df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"), index=True)
         self.df_combined_cache_dict = {}
 
     def get_latest_operation_signals(self):
@@ -444,6 +463,9 @@ class DataBlob(object):
             df_daily_net_value = df_daily_net_value[df_daily_net_value.index >= df_account_value.index[0]]
             capital = df_account_value.iloc[0]['NetValue']
 
+        df_daily_net_value.plot()
+        plt.show()
+
         df_daily_net_value_withou_combined = df_daily_net_value.drop('combined', axis=1)
         print("return correlation matrix")
         print(df_daily_net_value_withou_combined.corr())
@@ -452,8 +474,6 @@ class DataBlob(object):
         print("price correlation matrix")
         print(df_combined_adjust_price.corr())
 
-        df_daily_net_value_withou_combined.plot()
-        plt.show()
 
         df_daily_net_value['NetValue'] = df_daily_net_value['combined'] + capital
         df_daily_net_value['DailyReturn'] = df_daily_net_value['NetValue'].pct_change()
