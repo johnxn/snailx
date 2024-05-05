@@ -41,20 +41,22 @@ def run_us_market():
         futures_continuous_dir='data/futures/continuous',
         futures_combined_dir='data/futures/combined',
         futures_roll_calendar_dir='data/futures/roll_calendar',
+        symbol_config_file_path='data/futures/all_symbols.csv',
         daily_account_value_file_path='data/futures/daily_account_value.csv',
-        portfolio_config_file_path='config/symbols_us_futures.csv',
-        strategy_rules_config_file_path='config/strategy_rules.csv',
-        strategy_parameters_config_file_path='config/strategy_parameters.csv',
+        daily_symbol_weight_file_path='data/futures/daily_symbol_weights.csv',
+        daily_rule_weight_file_path='data/futures/daily_rule_weights.csv',
+        strategy_rules_config_file_path='data/futures/strategy_rules.csv',
+        strategy_parameters_config_file_path='data/futures/strategy_parameters.csv',
     )
     data_source = DataSourceNorgate()
     data_broker = FutuDataBroker()
     data_blob = DataBlob(csv_config_dict, data_source, data_broker)
     data_blob.update_daily_account_value()
     data_blob.update_single_contracts_in_portfolio()
-    # data_blob.generate_roll_calendar_in_portfolio(by_volume=False)
-    data_blob.update_roll_calendar_in_portfolio()
+    data_blob.generate_roll_calendar_in_portfolio(by_volume=True)
+    data_blob.update_roll_calendar_in_portfolio(by_volume=False)
     data_blob.update_data_continuous_in_portfolio()
-    data_blob.run_strategy(StrategyRobert)
+    data_blob.run_strategy(StrategyRobert, is_live=True)
     signal_date, df_signal = data_blob.get_latest_operation_signals()
     mailer.send_mail(subject=f"US Futures {util.datetime_to_str(signal_date)}", content=df_signal.to_html(index=True))
     data_broker.destroy()

@@ -16,10 +16,12 @@ class DataBlob(object):
         self.futures_continuous_dir = os.path.join(project_dir, csv_config_dict['futures_continuous_dir'])
         self.futures_combined_dir = os.path.join(project_dir, csv_config_dict['futures_combined_dir'])
         self.futures_roll_calendar_dir = os.path.join(project_dir, csv_config_dict['futures_roll_calendar_dir'])
-        self.portfolio_config_file_path = os.path.join(project_dir, csv_config_dict['portfolio_config_file_path'])
+        self.symbol_config_file_path = os.path.join(project_dir, csv_config_dict['symbol_config_file_path'])
         self.strategy_rules_config_file_path = os.path.join(project_dir, csv_config_dict['strategy_rules_config_file_path'])
         self.strategy_parameters_config_file_path = os.path.join(project_dir, csv_config_dict['strategy_parameters_config_file_path'])
         self.daily_account_value_file_path = os.path.join(project_dir, csv_config_dict['daily_account_value_file_path'])
+        self.daily_symbol_weight_file_path = os.path.join(project_dir, csv_config_dict['daily_symbol_weight_file_path'])
+        self.daily_rule_weight_file_path = os.path.join(project_dir, csv_config_dict['daily_rule_weight_file_path'])
 
         self.data_source = data_source
         self.data_broker = data_broker
@@ -29,8 +31,12 @@ class DataBlob(object):
         self.df_continuous_cache_dict = {}
         self.df_combined_cache_dict = {}
         self.df_trade_calendar_cahce_dict = {}
-        self.df_portfolio_config = None
         self.df_daily_account_value = None
+        self.df_daily_symbol_weights = None
+        self.df_daily_rule_weights = None
+
+        self.all_symbol_info_list = None
+        self.all_symbol_info_dict = None
         self.portfolio = None
 
         self.strategy_rules = None
@@ -51,15 +57,26 @@ class DataBlob(object):
                 if not os.path.exists(sub_dir):
                     os.makedirs(sub_dir)
 
-    def get_portfolio_config(self) -> pd.DataFrame:
-        if self.df_portfolio_config is None:
-            self.df_portfolio_config = pd.read_csv(self.portfolio_config_file_path)
-        return self.df_portfolio_config
-    
+    def get_all_symbol_info_list(self) -> list:
+        if self.all_symbol_info_list is None:
+            df_symbol_config = pd.read_csv(self.symbol_config_file_path)
+            self.all_symbol_info_list = df_symbol_config.to_dict(orient='records')
+        return self.all_symbol_info_list
+
+    def get_all_symbol_info_dict(self) -> dict:
+        if self.all_symbol_info_dict is None:
+            all_symbol_info_list = self.get_all_symbol_info_list()
+            self.all_symbol_info_dict = {symbol_info['symbol']: symbol_info for symbol_info in all_symbol_info_list}
+        return self.all_symbol_info_dict
+
     def get_portfolio(self) -> list:
+        df_symbol_weights = self.get_daily_symbol_weights()
+        symbol_list = df_symbol_weights.columns
         if self.portfolio is None:
-            df_portfolio_config = self.get_portfolio_config()
-            self.portfolio = df_portfolio_config.to_dict(orient='records')
+            self.portfolio = []
+            all_symbol_info_dict = self.get_all_symbol_info_dict()
+            for symbol in symbol_list:
+                self.portfolio.append(all_symbol_info_dict[symbol])
         return self.portfolio
 
     def get_portfolio_symbol_list(self) -> list:
@@ -70,7 +87,7 @@ class DataBlob(object):
             if info['symbol'] == symbol:
                 return info
         return None
-    
+
     def get_single_contract_file_path(self, symbol, contract_date):
         return os.path.join(self.futures_single_contracts_dir, f"{symbol}/{contract_date}.csv")
 
@@ -270,7 +287,7 @@ class DataBlob(object):
             df_roll_calendar = df_roll_calendar.drop_duplicates(subset='CurrentContract', keep='last')
             df_roll_calendar.to_csv(os.path.join(self.futures_roll_calendar_dir, f"{symbol}.csv"), index=True)
 
-    def update_roll_calendar_in_portfolio(self):
+    def update_roll_calendar_in_portfolio(self, by_volume=True):
         for symbol in self.get_portfolio_symbol_list():
             roll_calendar_file_path = os.path.join(self.futures_roll_calendar_dir, f"{symbol}.csv")
             if not os.path.exists(roll_calendar_file_path):
@@ -279,8 +296,11 @@ class DataBlob(object):
                 df_roll_calendar = self.get_roll_calendar(symbol)
                 start_date = df_roll_calendar.index[-1]
                 start_date += timedelta(days=1)
-                df_roll_calendar_added = self.build_roll_calendar_by_config(symbol, start_date)
-                if len(df_roll_calendar_added) > 0:
+                if by_volume is True:
+                    df_roll_calendar_added = self.build_roll_calendar_by_volume(symbol, start_date)
+                else:
+                    df_roll_calendar_added = self.build_roll_calendar_by_config(symbol, start_date)
+                if df_roll_calendar_added is not None and len(df_roll_calendar_added) > 0:
                     df_roll_calendar = pd.concat([df_roll_calendar, df_roll_calendar_added])
                     df_roll_calendar = df_roll_calendar.drop_duplicates(subset='CurrentContract', keep='last')
                     df_roll_calendar.to_csv(roll_calendar_file_path, index=True)
@@ -342,7 +362,8 @@ class DataBlob(object):
         return df_continuous
 
     def update_data_continuous_in_portfolio(self):
-        for symbol in self.get_portfolio_symbol_list():
+        symbol_list = self.get_portfolio_symbol_list()
+        for symbol in symbol_list:
             continuous_file_path = os.path.join(self.futures_continuous_dir, f"{symbol}.csv")
             df_continuous = self.build_data_continuous(symbol)
             df_continuous.to_csv(continuous_file_path, index=True)
@@ -386,19 +407,27 @@ class DataBlob(object):
             return self.df_daily_account_value
         return None
 
+    def get_daily_symbol_weights(self):
+        if os.path.exists(self.daily_symbol_weight_file_path):
+            self.df_daily_symbol_weights = pd.read_csv(self.daily_symbol_weight_file_path, index_col='Date', parse_dates=['Date'])
+            return self.df_daily_symbol_weights
+        return None
+
+    def get_daily_rule_weights(self):
+        if os.path.exists(self.daily_rule_weight_file_path):
+            self.df_daily_rule_weights = pd.read_csv(self.daily_rule_weight_file_path, index_col='Date', parse_dates=['Date'])
+            return self.df_daily_rule_weights
+        return None
+
     def plot_daily_account_value(self):
         df_daily_value = self.get_daily_account_value()
         if df_daily_value is not None:
             df_daily_value.plot()
             plt.show()
 
-    def run_strategy(self, strategy_class):
+    def run_strategy(self, strategy_class, is_live=False):
         s = strategy_class(self)
-        df_daily_account_value = self.get_daily_account_value()
-        if df_daily_account_value is not None:
-            s.go_live(df_daily_account_value)
-        else:
-            s.simulate()
+        s.simulate(is_live)
         df_combined_data_dict = s.get_df_combined_data_dict()
         for name, df_combined in df_combined_data_dict.items():
             df_combined.to_csv(os.path.join(self.futures_combined_dir, f"{name}.csv"), index=True)
@@ -414,7 +443,7 @@ class DataBlob(object):
             names.append('DiffContracts')
 
         df_combined_list = []
-        combined_names = ['DailyContracts', 'CurrentContract', 'CarryContract', 'AdjustPrice',  'Forecast']
+        combined_names = ['DailyContracts', 'DailyWeights', 'CurrentContract', 'CarryContract', 'AdjustPrice',  'Forecast']
         signal_date = None
         for name in combined_names:
             df = self.get_combined_data(name)
@@ -432,10 +461,8 @@ class DataBlob(object):
     def plot_simulated_daily_net_value(self):
         df_daily_net_value = self.get_combined_data('DailyNetValue')
         df_account_value = self.get_daily_account_value()
-        capital = self.get_strategy_parameters()['capital']
-        if df_account_value is not None:
-            df_daily_net_value = df_daily_net_value[df_daily_net_value.index >= df_account_value.index[0]]
-            capital = df_account_value.iloc[0]['NetValue']
+        df_daily_net_value = df_daily_net_value[df_daily_net_value.index >= df_account_value.index[0]]
+        # df_daily_net_value = df_daily_net_value.copy()
 
         df_daily_net_value.plot()
         plt.show()
@@ -448,8 +475,9 @@ class DataBlob(object):
         print("price correlation matrix")
         print(df_combined_adjust_price.corr())
 
-
-        df_daily_net_value['NetValue'] = df_daily_net_value['combined'] + capital
+        merged_index = df_account_value.index.union(df_daily_net_value.index)
+        df_account_value = df_account_value.reindex(merged_index).ffill().fillna(0)
+        df_daily_net_value['NetValue'] = df_daily_net_value['combined'] + df_account_value['NetValue'] + df_account_value['Cash']
         df_daily_net_value['DailyReturn'] = df_daily_net_value['NetValue'].pct_change()
         rolling_annual_return = df_daily_net_value['DailyReturn'].rolling(window=252).apply(lambda x: ((1 + x.mean()) ** 252) - 1, raw=True)
         rolling_annual_volatility = df_daily_net_value['DailyReturn'].rolling(window=252).std() * numpy.sqrt(252)
