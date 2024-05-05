@@ -1,8 +1,0 @@
-Name,Value
-instrument_diversification_multiplier,1.89
-forecast_diversification_multiplier,1.31
-forecast_base,10.0
-forecast_max,20.0
-volatility_lookback_window,25.0
-annual_risk_target,0.2
-capital,100000.0
