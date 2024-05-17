@@ -193,7 +193,7 @@ class DataBlob(object):
         for date, _ in df_roll_calendar.iterrows():
             current_year = None
             current_month = None
-            for add_year in range(-1, 2):
+            for add_year in range(-1, 4):
                 is_found = False
                 for candidate_month in roll_cycle:
                     candidate_year = date.year + add_year
