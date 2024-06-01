@@ -2,5 +2,4 @@ akshare
 futu_api
 matplotlib
 norgatedata
-numpy
-pandas
+
