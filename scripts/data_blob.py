@@ -421,8 +421,10 @@ class DataBlob(object):
 
     def plot_daily_account_value(self):
         df_daily_value = self.get_daily_account_value()
+        df_daily_value = df_daily_value.ffill().fillna(0)
+        df_daily_value['Total'] = df_daily_value['NetValue'] + df_daily_value['Cash']
         if df_daily_value is not None:
-            df_daily_value.plot()
+            df_daily_value['Total'].plot()
             plt.show()
 
     def run_strategy(self, strategy_class, is_live=False):
